@@ -6,8 +6,9 @@ const axios = require('axios');
 const config = JSON.parse(fs.readFileSync('/psobb-bot/discord_config.json', 'utf8'));
 
 const genAI = new GoogleGenerativeAI(config.gemini_api_key);
+// VERIFIED 2026 MODEL
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash",
     systemInstruction: config.system_prompt 
 });
 
@@ -35,51 +36,42 @@ async function getPlayerData(discordId) {
     }
 }
 
-
-
 async function handleMessage(channel, author, content, messageObj) {
     if (author.bot) return;
+    if (author.id !== config.user_id) return;
 
-    // Command: !link
+    console.log(`[ACTION] Processing message from ${author.id}`);
+
+    // Commands
     if (content.startsWith('!link')) {
-        return messageObj.reply(`🔗 **Secure Link Required:** Please link your Discord directly on your player dashboard at **https://psobb.io/login** (under Integrations) instead! This ensures your account remains secure.`);
+        return messageObj.reply(`🔗 **Secure Link Required:** Please link your Discord directly on your player dashboard at **https://psobb.io/login** instead!`);
     }
 
-    // Command: !stats
     if (content.startsWith('!stats')) {
         const data = await getPlayerData(author.id);
         if (!data || data.error) {
-            return messageObj.reply("❌ **Data Link Offline:** I don't have a player profile linked to your Discord. Use `!link <username>` first!");
+            return messageObj.reply("❌ **Data Link Offline:** No player profile linked! Check the website.");
         }
-        
         const characters = data.Characters || [];
         let charInfo = characters.map(c => `🔹 **${c.Name}** (Lvl ${c.Level} ${c.Class})`).join('\n') || 'No characters found.';
-        
-        return messageObj.reply(`📊 **Hunter Profile: ${data.website_username}**\n\n${charInfo}\n\n*Keep pushing, Hunter! Your progress is being monitored from orbit.*`);
+        return messageObj.reply(`📊 **Hunter Profile: ${data.website_username}**\n\n${charInfo}`);
     }
 
-    // Default: Gemini Chat
+    // Default Chat
     try {
         await channel.sendTyping();
-        
-        // Fetch context if linked
         const playerData = await getPlayerData(author.id);
-        let contextualPrompt = content;
+        let prompt = content;
         if (playerData && !playerData.error) {
-            contextualPrompt = `Context: The user is Phantasy Star Online player "${playerData.website_username}". ` +
-                               `Their characters are: ${JSON.stringify(playerData.Characters)}. ` +
-                               `User Message: ${content}`;
+            prompt = `Context: User is player "${playerData.website_username}" with characters: ${JSON.stringify(playerData.Characters)}. Message: ${content}`;
         }
 
-        const result = await model.generateContent(contextualPrompt);
-        const response = await result.response;
-        const text = response.text();
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
 
         if (text.length > 2000) {
             const chunks = text.match(/[\s\S]{1,2000}/g) || [];
-            for (const chunk of chunks) {
-                await messageObj.reply(chunk);
-            }
+            for (const chunk of chunks) await messageObj.reply(chunk);
         } else {
             await messageObj.reply(text);
         }
@@ -92,6 +84,20 @@ client.on(Events.MessageCreate, async (message) => {
     if (message.partial) await message.fetch().catch(() => {});
     if (message.channel.type === ChannelType.DM || !message.guild) {
         handleMessage(message.channel, message.author, message.content, message);
+    }
+});
+
+// RAW Fallback for environments where messageCreate is suppressed for DMs
+client.on('raw', async (packet) => {
+    if (packet.t === 'MESSAGE_CREATE') {
+        const data = packet.d;
+        if (data.author.id === client.user.id || data.author.id !== config.user_id) return;
+
+        setTimeout(async () => {
+            const channel = await client.channels.fetch(data.channel_id).catch(() => null);
+            if (!channel || (channel.lastMessageId === data.id && channel.lastMessage?.author.id === client.user.id)) return;
+            handleMessage(channel, data.author, data.content, channel);
+        }, 1000);
     }
 });
 
