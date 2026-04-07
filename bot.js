@@ -35,33 +35,14 @@ async function getPlayerData(discordId) {
     }
 }
 
-async function linkAccount(discordId, username) {
-    try {
-        const params = new URLSearchParams();
-        params.append('username', username);
-        params.append('discord_id', discordId);
-        
-        const response = await axios.post(`${config.bot_api_url}?action=link`, params, {
-            headers: { 'Authorization': `Bearer ${config.bot_api_secret}` }
-        });
-        return response.data;
-    } catch (error) {
-        return { error: 'API connection failed' };
-    }
-}
+
 
 async function handleMessage(channel, author, content, messageObj) {
     if (author.bot) return;
 
-    // Command: !link <username>
-    if (content.startsWith('!link ')) {
-        const username = content.split(' ')[1];
-        const result = await linkAccount(author.id, username);
-        if (result.success) {
-            return messageObj.reply(`✅ **Pioneer 2 Uplink Established!** Your Discord ID is now linked to Hunter account: **${username}**.`);
-        } else {
-            return messageObj.reply(`❌ **Link Failed:** ${result.error || 'Check your website username and try again.'}`);
-        }
+    // Command: !link
+    if (content.startsWith('!link')) {
+        return messageObj.reply(`🔗 **Secure Link Required:** Please link your Discord directly on your player dashboard at **https://psobb.io/login** (under Integrations) instead! This ensures your account remains secure.`);
     }
 
     // Command: !stats
