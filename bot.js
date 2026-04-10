@@ -15,6 +15,7 @@ const model = genAI.getGenerativeModel({
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent,
     ],
@@ -38,9 +39,8 @@ async function getPlayerData(discordId) {
 
 async function handleMessage(channel, author, content, messageObj) {
     if (author.bot) return;
-    if (author.id !== config.user_id) return;
 
-    console.log(`[ACTION] Processing message from ${author.id}`);
+    console.log(`[ACTION] Processing message from ${author.id} (${author.username})`);
 
     // Commands
     if (content.startsWith('!link')) {
@@ -59,11 +59,17 @@ async function handleMessage(channel, author, content, messageObj) {
 
     // Default Chat
     try {
-        await channel.sendTyping();
+        if (typeof channel.sendTyping === 'function') {
+            await channel.sendTyping();
+        }
+        
         const playerData = await getPlayerData(author.id);
-        let prompt = content;
+        const cleanContent = content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+        if (!cleanContent) return;
+
+        let prompt = cleanContent;
         if (playerData && !playerData.error) {
-            prompt = `Context: User is player "${playerData.website_username}" with characters: ${JSON.stringify(playerData.Characters)}. Message: ${content}`;
+            prompt = `Context: User is player "${playerData.website_username}" with characters: ${JSON.stringify(playerData.Characters)}. Message: ${cleanContent}`;
         }
 
         const result = await model.generateContent(prompt);
@@ -82,22 +88,13 @@ async function handleMessage(channel, author, content, messageObj) {
 
 client.on(Events.MessageCreate, async (message) => {
     if (message.partial) await message.fetch().catch(() => {});
-    if (message.channel.type === ChannelType.DM || !message.guild) {
+    if (message.author.bot) return;
+
+    const isDM = message.channel.type === ChannelType.DM || !message.guild;
+    const isMentioned = message.mentions.has(client.user) && !message.mentions.everyone;
+
+    if (isDM || isMentioned) {
         handleMessage(message.channel, message.author, message.content, message);
-    }
-});
-
-// RAW Fallback for environments where messageCreate is suppressed for DMs
-client.on('raw', async (packet) => {
-    if (packet.t === 'MESSAGE_CREATE') {
-        const data = packet.d;
-        if (data.author.id === client.user.id || data.author.id !== config.user_id) return;
-
-        setTimeout(async () => {
-            const channel = await client.channels.fetch(data.channel_id).catch(() => null);
-            if (!channel || (channel.lastMessageId === data.id && channel.lastMessage?.author.id === client.user.id)) return;
-            handleMessage(channel, data.author, data.content, channel);
-        }, 1000);
     }
 });
 
