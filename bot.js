@@ -53,8 +53,13 @@ async function handleMessage(channel, author, content, messageObj) {
             return messageObj.reply("❌ **Data Link Offline:** No player profile linked! Check the website.");
         }
         const characters = data.Characters || [];
-        let charInfo = characters.map(c => `🔹 **${c.Name}** (Lvl ${c.Level} ${c.Class})`).join('\n') || 'No characters found.';
-        return messageObj.reply(`📊 **Hunter Profile: ${data.website_username}**\n\n${charInfo}`);
+        let charInfo = characters.map(c => `🔹 **${c.Name}** (Lvl ${c.Level} ${c.Class}) - ${c.Meseta} Meseta | Playtime: ${c.PlayTimeSeconds}s`).join('\n') || 'No characters found online.';
+        
+        const loginDays = data.website_stats?.total_login_days || 0;
+        const missions = data.website_stats?.missions || [];
+        const missionInfo = missions.length ? '\n📜 **Missions:** ' + missions.map(m => `${m.title} (${m.status})`).join(', ') : '';
+        
+        return messageObj.reply(`📊 **Hunter Profile: ${data.website_username}**\n🟢 Online: ${data.is_online ? 'Yes' : 'No'}\n📅 Logins: ${loginDays}${missionInfo}\n\n${charInfo}`);
     }
 
     // Default Chat
@@ -69,7 +74,7 @@ async function handleMessage(channel, author, content, messageObj) {
 
         let prompt = cleanContent;
         if (playerData && !playerData.error) {
-            prompt = `Context: User is player "${playerData.website_username}" with characters: ${JSON.stringify(playerData.Characters)}. Message: ${cleanContent}`;
+            prompt = `Context: User is player "${playerData.website_username}". Currently online: ${playerData.is_online}. Total login days: ${playerData.website_stats?.total_login_days || 0}. Missions: ${JSON.stringify(playerData.website_stats?.missions || [])}. Characters: ${JSON.stringify(playerData.Characters)}. Message from user: ${cleanContent}`;
         }
 
         const result = await model.generateContent(prompt);
@@ -96,6 +101,4 @@ client.on(Events.MessageCreate, async (message) => {
     if (isDM || isMentioned) {
         handleMessage(message.channel, message.author, message.content, message);
     }
-});
-
 client.login(config.bot_token);
