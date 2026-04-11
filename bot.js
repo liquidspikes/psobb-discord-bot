@@ -6,43 +6,48 @@ const axios = require('axios');
 const config = JSON.parse(fs.readFileSync('/psobb-bot/discord_config.json', 'utf8'));
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.MessageContent,
-    ],
-    partials: [Partials.Channel, Partials.Message, Partials.User],
+    intents: 3276799,
+    partials: Object.values(Partials).filter(x => typeof x === 'number'),
 });
 
+let fullPrompt = config.system_prompt;
+try {
+    if (fs.existsSync('/psobb-bot/knowledge.md')) {
+        const knowledge = fs.readFileSync('/psobb-bot/knowledge.md', 'utf8');
+        fullPrompt += "\n\n### REFERENCE KNOWLEDGE BASE ###\n" + knowledge;
+    }
+} catch (e) {
+    console.error("Error reading knowledge.md:", e.message);
+}
+
 const genAI = new GoogleGenerativeAI(config.gemini_api_key);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite", systemInstruction: config.system_prompt });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite", systemInstruction: fullPrompt });
 
 client.once(Events.ClientReady, (c) => {
     console.log("[READY] Bot is live: " + c.user.tag);
+    console.log("[READY] Intents bitfield: " + c.options.intents);
 });
 
-function getClearObjective(type, target) {
-    switch (type) {
-        case 'MESETA': return "Hold at least " + Number(target).toLocaleString() + " Meseta in inventory";
-        case 'LEVEL': return "Reach Level " + target;
-        case 'PLAYTIME': return "Accumulate " + Math.floor(Number(target) / 3600).toLocaleString() + " hours of playtime";
-        case 'ITEM': return "Find and hold the item: " + target;
-        case 'TECHNIQUE': return "Learn the technique: " + target;
-        case 'BATTLE_WINS': return "Achieve " + target + " 1st place Battle Mode wins";
-        case 'CHALLENGE_STAGES': return "Complete " + target + " Challenge Mode stages";
-        case 'MAT_HP': return "Consume a total of " + target + " HP Materials";
-        case 'MAT_TP': return "Consume a total of " + target + " TP Materials";
-        case 'MAT_POWER': return "Consume a total of " + target + " Power Materials";
-        case 'MAT_DEF': return "Consume a total of " + target + " Def Materials";
-        case 'MAT_MIND': return "Consume a total of " + target + " Mind Materials";
-        case 'MAT_EVADE': return "Consume a total of " + target + " Evade Materials";
-        case 'MAT_LUCK': return "Consume a total of " + target + " Luck Materials";
-        case 'EXPLORATION': return "Explore Location Floor: " + target;
-        case 'BOSS_ARENA': return "Defeat the boss at Floor: " + target;
-        default: return type + ": " + target;
+const handledMessages = new Set();
+
+client.on('raw', async packet => {
+    if (packet.t === 'MESSAGE_CREATE') {
+        console.log("[RAW EVENT] MESSAGE_CREATE from " + packet.d.author.id + " in channel " + packet.d.channel_id);
+        
+        if (!packet.d.guild_id) {
+            try {
+                const channel = await client.channels.fetch(packet.d.channel_id);
+                const message = await channel.messages.fetch(packet.d.id);
+                
+                if (message && !handledMessages.has(message.id)) {
+                    client.emit(Events.MessageCreate, message);
+                }
+            } catch (e) {
+                console.error("[RAW RECOVERY ERROR]", e.message);
+            }
+        }
     }
-}
+});
 
 async function getPlayerData(discordId) {
     try {
@@ -59,10 +64,16 @@ async function getPlayerData(discordId) {
 }
 
 client.on(Events.MessageCreate, async (message) => {
-    console.log("[GATEKEEPER] MessageCreate event fired. Author: " + (message.author ? message.author.tag : "Unknown"));
+    if (!message || handledMessages.has(message.id)) return;
+    handledMessages.add(message.id);
+    if (handledMessages.size > 1000) handledMessages.clear();
+
+    console.log("[GATEKEEPER] Received message from: " + (message.author ? message.author.tag : "UNKNOWN"));
+    
     if (message.author && message.author.bot) return;
 
     if (message.partial) {
+        console.log("[DEBUG] Message is partial, fetching...");
         try { await message.fetch(); } catch (e) { console.error("[PARTIAL ERROR]", e.message); return; }
     }
 
@@ -71,60 +82,52 @@ client.on(Events.MessageCreate, async (message) => {
     const isCommand = message.content.startsWith('!');
     const isConfigChannel = message.channel.id === config.channel_id;
 
-    // Accept messages from everyone if: it's a DM, they mention the bot, it's a command, or they are in the bot channel
-    if (!isDM && !isMentioned && !isCommand && !isConfigChannel) return;
+    console.log("[DEBUG] isDM: " + isDM + " | isMentioned: " + isMentioned + " | isCommand: " + isCommand + " | isConfigChannel: " + isConfigChannel);
 
-    console.log("[MSG] from " + message.author.tag + " in " + (isDM ? "DM" : "Guild") + ": " + message.content);
-
-    // Commands
-    if (message.content.startsWith('!link')) {
-        return message.reply("🔗 **Secure Link Required:** Please link your Discord directly on your player dashboard at **https://psobb.io/login** instead!");
+    if (!isDM && !isMentioned && !isCommand && !isConfigChannel) {
+        console.log("[DEBUG] Ignoring message - did not meet criteria.");
+        return;
     }
+
+    console.log("[MSG] Content: " + message.content);
 
     if (message.content.startsWith('!stats')) {
         const data = await getPlayerData(message.author.id);
         if (data && data.website_username) {
             const characters = data.Characters || [];
             let charInfo = characters.map(c => "🔹 **" + c.Name + "** (Lvl " + c.Level + " | EXP: " + (c.EXP || 0) + ")").join('\n') || 'No characters found online.';
-            return message.reply("📊 **Hunter Profile: " + data.website_username + "**\n" + 
-                                 "📅 Logins: " + (data.website_stats?.total_login_days || 0) + "\n\n" + charInfo);
+            return message.reply("📊 **Hunter Profile: " + data.website_username + "**\n📅 Logins: " + (data.website_stats?.total_login_days || 0) + "\n\n" + charInfo);
         }
         return message.reply("❌ **Not Linked:** Visit https://psobb.io to link your Discord!");
     }
-    
-    if (message.content.startsWith('!bounties') || message.content.startsWith('!quest')) {
-        const data = await getPlayerData(message.author.id);
-        if (!data || data.error) return message.reply("❌ **Data Link Offline:** No player profile linked! Check the website.");
-        
-        const missions = Array.isArray(data.website_stats?.missions) ? data.website_stats.missions : [];
-        const activeMissions = missions.filter(m => m.status === 'in_progress');
-        
-        let responseText = "🎯 **Hunters Guild Bounty Board for " + data.website_username + "**\n\n";
-        if (activeMissions.length > 0) {
-            responseText += "✅ **Active Bounties:**\n";
-            activeMissions.forEach(m => {
-                responseText += "🔹 **" + m.title + "**\n   *" + m.description + "*\n   Goal: `" + getClearObjective(m.goal_type, m.goal_target) + "`\n\n";
-            });
-        } else {
-            responseText += "🔹 *No active bounties. Missions are assigned automatically or via Server Events!*\n\n";
-        }
-        return message.reply(responseText);
-    }
 
-    // Prevent AI from replying to unknown commands
-    if (isCommand) return;
-
+    if (isCommand) return; // Only process AI chat if it's not a known command
     // AI Chat
     try {
         if (message.channel.sendTyping) await message.channel.sendTyping().catch(() => {});
         const playerData = await getPlayerData(message.author.id);
-        let prompt = message.content;
+
+        const rawHistory = await message.channel.messages.fetch({ limit: 12 });
+        const historyMsgs = Array.from(rawHistory.values()).reverse().filter(m => m.id !== message.id && !m.content.startsWith('!'));
+
+        let prompt = "";
         if (playerData && !playerData.error) {
-            prompt = "Context: Player is " + playerData.website_username + ". Message: " + message.content;
+            prompt += "Context: You are talking to player " + playerData.website_username + ".\n\n";
         }
+
+        if (historyMsgs.length > 0) {
+            prompt += "Recent Conversation History:\n";
+            for (const msg of historyMsgs) {
+                prompt += `[${msg.author.username === client.user.username ? 'Mission Command' : msg.author.username}]: ${msg.content}\n`;
+            }
+            prompt += "\n";
+        }
+        
+        prompt += `[${message.author.username}]: ${message.content}\n[Mission Command]: `;
+
         const result = await model.generateContent(prompt);
         const responseText = result.response.text();
-        
+
         if (responseText.length > 2000) {
             const chunks = responseText.match(/[\s\S]{1,2000}/g) || [];
             for (const chunk of chunks) await message.reply(chunk);
@@ -133,9 +136,7 @@ client.on(Events.MessageCreate, async (message) => {
         }
     } catch (e) {
         console.error("[AI ERROR]", e.message);
-        if (e.message.includes("safety") || e.message.includes("overload") || e.message.includes("503")) {
-            await message.reply("📡 **Communication Interrupted:** Pioneer 2's link is busy or blocked.");
-        }
+        await message.reply("📡 **Communication Interrupted:** Pioneer 2's link is busy or blocked.");
     }
 });
 
