@@ -52,4 +52,4 @@ Mags are robotic companions that boost your stats and provide support.
 
 ### Server Info
 *   This bot supports the psobb.io private server.
-*   Feedback can be posted to the Discord form.
+*   Feedback can be posted to the Discord forum. You can always DM @liquidSpikes as well.
