@@ -39,16 +39,35 @@ Mags are robotic companions that boost your stats and provide support.
 *   Synchro (0-120%): Affects Photon Blast damage and trigger rates. Drops by 5% if you die.
 *   IQ (0-200): Affects the strength of Mag-cast support spells.
 
-### Evolution Tiers
-1.  Level 10: First evolution based on Class.
-2.  Level 35: Second evolution based on highest stat.
-3.  Level 50: Third evolution based on Class, Section ID, and stats. Changes form every 5 levels if conditions change.
-4.  Level 100 (4th Evolution): Requires specific stat equations (e.g., DEF + MIND = POW + DEX). Mags like Sato, Nidra, or Pushan are prized for superior Triggers.
+### Evolution Tiers (via ragol.co.uk/guides/mags/)
+Mag evolution triggers at specific level milestones. A Mag's form dictates its active Triggers (Invincibility/Resta/Shifta) and what Photon Blasts it learns.
+1.  **Level 10 (1st Evolution):** Dictated entirely by the Hunter's Class. 
+    *   Hunters -> Varuna
+    *   Rangers -> Kalki
+    *   Forces -> Vritra
+2.  **Level 35 (2nd Evolution):** Dictated by the Mag's highest core combat stat (POW, DEX, or MIND). Examples include Ashvinau, Marutah, Mitra, Namuci, Rudra, Sumba, Surya, and Tapas.
+3.  **Level 50 (3rd Evolution):** Dictated by a complex triangle of Class, Section ID group (A or B), and stat balance equations (e.g., POW > DEX > MIND). The Mag will dynamically re-evaluate and potentially change its form every 5 levels (55, 60, 65...) if these conditions shift.
+4.  **Level 100 (4th Evolution / Rare Mags):** Requires perfect mathematical stat equations (e.g., DEF + MIND = POW + DEX) fed by specific Class/Section ID combos. Rare Mags (like Sato, Nidra, Diqqaq) permanently lock their form and boast superior Trigger activations.
+5.  **Cell Evolutions:** Mags can be force-evolved utilizing special "Mag Cell" items (e.g., Panther's Spirit, Heart of Chao) irrespective of level/stat math, permanently locking their aesthetic but halting PB acquisition.
 
 ### Photon Blasts (PB) & Triggers
 *   Photon Blasts: Unleashed at 100% PB gauge. Max 3.
 *   Triggers: % chance to activate effects at 100% PB, 10% HP, or entering a Boss Room.
 *   Effects: Invincibility, Resta, or Shifta & Deband. Mags like Sato and Nidra offer 50% chance of Invincibility at 100% PB and 10% HP.
+
+## 4. Episode 4 Lore Summary (Blue Burst Exclusive)
+Episode 4 shifts the focus back to the surface of the planet Ragol after the defeat of Dark Falz and Olga Flow. 
+A massive meteor suddenly crashes onto the planet's surface, carving out the massive "Crater". Pioneer 2 immediately establishes a forward operating base to investigate the anomaly.
+
+### The Crater and Subterranean Desert
+*   **The Crater:** The meteor impact radically mutated the local flora and fauna. The area is infested with highly aggressive reptilian and insectoid bio-weapons (e.g., Astarks, Zu, Satellite Lizards).
+*   **The Subterranean Desert:** Digging below the Crater, Hunters discover an ancient, hyper-advanced underground facility buried in the sands. It predates the Pioneer project by millennia and houses ancient civilization technology.
+*   **The Meteor's Core:** The meteor wasn't just a rock; it was a cosmic vessel or seal. Slumbering within the deepest parts of the Subterranean Desert is the ancient D-Cell beast known as **Saint-Million** (or its variants, Shambertin and Kondrieu).
+
+### Black Paper & Human Conflict
+Unlike Ep1 and Ep2 which focused on D-Cell monsters, Ep4 focuses heavily on human-to-human syndicate conflict. 
+*   **Black Paper:** A dangerous underground criminal syndicate operating on Pioneer 2. Led by the highly enigmatic **Leo Grahart**, Black Paper seeks to exploit the ancient technology and meteor debris in the Subterranean Desert to overthrow the Principal and assume control of the ship.
+*   **Rupika:** A young girl with mystical connections to the ancient forces of Ragol, who becomes a central figure caught between the Hunter's Guild investigation and Black Paper's violent ambitions.
 
 ### Server Info
 *   This bot supports the psobb.io private server.
