@@ -1,74 +1,73 @@
-# Phantasy Star Online Blue Burst (PSOBB) Knowledge Base
+# Phantasy Star Online Blue Burst (PSOBB) Comprehensive Knowledge Base
 
-## 1. Character Classes & Species
+## 1. The World & The Pioneer Project
+The story of PSO is one of desperate survival and ancient mysteries.
+
+### The Exodus from Coral
+*   **Planet Coral:** The original home of the various species. It became uninhabitable due to ecological collapse and endless war.
+*   **The 10-Year Voyage:** The Pioneer Project was launched to find a new home. Two massive colony ships were built: **Pioneer 1** and **Pioneer 2**.
+*   **Pioneer 1:** The vanguard ship. It arrived at the planet **Ragol** seven years before the game begins. They established the Central Dome and reported the planet was suitable for colonization.
+*   **The Explosion:** As Pioneer 2 arrived in orbit, a massive explosion rocked the surface of Ragol, originating from the Central Dome. All communication with Pioneer 1 was lost instantly.
+
+### The Nature of D-Cells (D-Factor)
+*   **Source:** A meteor that struck Coral centuries ago brought an extraterrestrial genetic material known as **D-Cells**.
+*   **Double-Edged Sword:** D-Cells allowed for the development of **Photon technology** (weapons, shields, and travel), but they are highly parasitic.
+*   **Mutagenesis:** Exposure to D-Cells (the "D-Factor") causes horrific biological mutations, turning local wildlife into aggressive monsters. The Pioneer Project was secretly a mission by the military and scientific elites to find the source of these cells on Ragol.
+
+---
+
+## 2. Episode 1: The Tragedy of Rico Tyrell
+Hunters from Pioneer 2 descend to the surface to investigate the explosion and find survivors.
+
+### The Path of the Hunter
+*   **Forest:** A lush environment where the local wildlife has mutated into aggressive beasts.
+*   **Caves:** A bioluminescent underground network. The boss, **De Rol Le**, is a massive, leech-like "Altered Beast" created by Dr. Osto, responsible for spreading the mutagenic virus.
+*   **Mines:** A highly advanced industrial complex. The boss, **Vol Opt**, is a sentient AI that seized control of the facility's machinery.
+*   **Ruins:** An ancient, biological spaceship buried deep underground—actually a prison for an ancient evil.
+
+### Red Ring Rico
+*   **Rico Tyrell:** The daughter of Principal Tyrell and the most famous Hunter on Pioneer 1. She was the first to realize that something was wrong beneath the surface.
+*   **The Message Capsules:** As she explored deeper, she left holograms and data capsules to guide anyone who followed her. These capsules detail her discovery of an ancient civilization beneath the planet.
+*   **The Awakening of Dark Falz:** Dark Falz is a primordial entity of destruction. Rico reached the heart of the Ruins alone and was consumed to become the physical host for Dark Falz to manifest.
+
+---
+
+## 3. Episode 2: The Mutation of Heathcliff Flowen
+Taking place on **Gal Da Val Island**, this episode reveals the darker side of Pioneer 1's scientific "progress."
+
+### The Mystery of Flowen
+*   **Heathcliff Flowen:** A legendary military commander and hero of the wars on Coral. During an early expedition to the Ruins, he was wounded by a proto-Dark Falz creature and became the first human infected by the D-Factor.
+*   **Dr. Osto & The Seabed:** Knowing he was doomed, Flowen donated his body to **Dr. Osto Hesser**, Pioneer 1's lead scientist. Instead of a cure, Osto merged Flowen's body with the island's central AI, **Olga**, attempting to create the ultimate biological super-weapon.
+*   **Olga Flow:** The result was a mindless, mutating horror. When it became uncontrollable, Osto dumped it into the **Seabed** disposal shaft. Its reactivation was triggered by the defeat of Dark Falz in Episode 1.
+
+---
+
+## 4. Episode 4: The Meteor & The Desert (Blue Burst Exclusive)
+Years after the events of Ep1 and Ep2, a new threat arrives from the stars.
+
+### The Meteor Impact
+*   **The Crater:** A massive meteor strikes Ragol, creating a massive impact site. This meteor was a "seed" of D-Cells from another part of the galaxy.
+*   **Saint-Million:** Slumbering within the meteor is an ancient, multi-headed beast (or variants **Shambertin** and **Kondrieu**). It acts as a focal point for D-Cell energy.
+
+### The WORKS & Leo Grahart
+*   **The Conflict:** **Leo Grahart**, leader of the elite **WORKS** military division, seeks to use the meteor's power to overthrow the government of Pioneer 2.
+*   **Rupika:** A young girl and "Neo-Newman" who has a unique genetic resonance with the meteor. Grahart uses her as a living key to unlock the meteor's core in the Subterranean Desert.
+
+---
+
+## 5. Character Classes & Species
 Characters are defined by three aspects: Profession (Hunter, Ranger, Force), Species (Human, Newman, Android), and Gender.
 
 ### Species Differences
-*   **Humans (HUmar, HUnl, RAmar, RAmarl, FOmar, FOmarl):** Balanced stats. They have the highest Material Limit (250), making them the most flexible. They cannot regenerate HP/TP naturally and cannot use traps.
-*   **Newmans (HUnewearl, FOnewm, FOnewearl):** Tech-focused. They naturally regenerate TP while standing still. They have a lower Material Limit (150).
-*   **Androids (HUcast, HUcaseal, RAcast, RAcaseal):** Cannot use Techniques but can use Traps. They regenerate HP while standing still and are immune to Poison and Paralysis. 
-    *   *Ultimate Difficulty Bonus:* +30% to EXP steal and status effect activation rates (Freeze/Paralyze/Confuse).
-    *   *Penalty:* Reduced effectiveness for HP-cut specials (Devil’s/Demon’s).
+*   **Humans (HUmar, HUnl, RAmar, RAmarl, FOmar, FOmarl):** Balanced stats. Highest Material Limit (250).
+*   **Newmans (HUnewearl, FOnewm, FOnewearl):** Tech-focused. Naturally regenerate TP while standing still. Lower Material Limit (150).
+*   **Androids (HUcast, HUcaseal, RAcast, RAcaseal):** Cannot use Techniques but can use Traps. Regenerate HP while standing still. Immune to Poison and Paralysis. 
+    *   *Ultimate Difficulty Bonus:* +30% to status effect activation rates (Freeze/Paralyze/Confuse).
 
-### Class Roles
-*   **Hunters (Melee):** HUcast has the highest ATP (Attack Power); HUcaseal has the highest ATA (Accuracy) and EVP (Evasion) among Hunters.
-*   **Rangers (Ranged):** RAmar has the highest ATA potential; RAcaseal has the highest DFP (Defense) potential in the game.
-*   **Forces (Techniques/Support):** FOnewearl has the highest MST (Mental Strength/TP); FOmarl is the most balanced for weapon use and support.
+---
 
-## 2. Section IDs
-Section IDs are assigned at character creation based on the character's name. They determine item drop tables.
-*   **Permanence:** The ID becomes permanent at Level 20. Before then, it can be changed once using the `/modsecid` command on some servers.
-*   **Hunting Focus:**
-    *   Viridia: Shots and Partisans.
-    *   Greenill: Rifles and Daggers.
-    *   Skyly: Swords and Rifles (Famous for the Sealed J-Sword).
-    *   Bluefull: Partisans and Rods.
-    *   Purplenum: Mechguns and Daggers (Famous for Yasminkov 9000M).
-    *   Pinkal: Wands and Partisans (Tech-user focused).
-    *   Redria: Frames, Barriers, and Slicers (High utility ID).
-    *   Oran: Daggers and Swords.
-    *   Yellowboze: Balanced drops, increased Meseta, and higher attribute chances.
-    *   Whitill: Slicers and Mechguns.
+## 6. Gameplay Mechanics & Section IDs
+*   **Section IDs:** Assigned at creation based on name. Determines item drops (e.g., Skyly for Swords, Purplenum for Mechguns).
+*   **Mags:** Robotic companions that boost stats (DEF, POW, DEX, MIND) and provide Photon Blasts (PB) at 100% energy.
+*   **PSOBB.io Server:** This bot supports the psobb.io community. Feedback can be sent to @liquidSpikes or via the Discord forum.
 
-## 3. Mag Mechanics
-Mags are robotic companions that boost your stats and provide support.
-
-### Core Stats & Feeding
-*   Stats: DEF (1 DFP), POW (2 ATP), DEX (0.5 ATA), and MIND (2 MST). Max Level: 200.
-*   Feeding Timer: Feed up to 3 items every 3 minutes and 30 seconds.
-*   Synchro (0-120%): Affects Photon Blast damage and trigger rates. Drops by 5% if you die.
-*   IQ (0-200): Affects the strength of Mag-cast support spells.
-
-### Evolution Tiers (via ragol.co.uk/guides/mags/)
-Mag evolution triggers at specific level milestones. A Mag's form dictates its active Triggers (Invincibility/Resta/Shifta) and what Photon Blasts it learns.
-1.  **Level 10 (1st Evolution):** Dictated entirely by the Hunter's Class. 
-    *   Hunters -> Varuna
-    *   Rangers -> Kalki
-    *   Forces -> Vritra
-2.  **Level 35 (2nd Evolution):** Dictated by the Mag's highest core combat stat (POW, DEX, or MIND). Examples include Ashvinau, Marutah, Mitra, Namuci, Rudra, Sumba, Surya, and Tapas.
-3.  **Level 50 (3rd Evolution):** Dictated by a complex triangle of Class, Section ID group (A or B), and stat balance equations (e.g., POW > DEX > MIND). The Mag will dynamically re-evaluate and potentially change its form every 5 levels (55, 60, 65...) if these conditions shift.
-4.  **Level 100 (4th Evolution / Rare Mags):** Requires perfect mathematical stat equations (e.g., DEF + MIND = POW + DEX) fed by specific Class/Section ID combos. Rare Mags (like Sato, Nidra, Diqqaq) permanently lock their form and boast superior Trigger activations.
-5.  **Cell Evolutions:** Mags can be force-evolved utilizing special "Mag Cell" items (e.g., Panther's Spirit, Heart of Chao) irrespective of level/stat math, permanently locking their aesthetic but halting PB acquisition.
-
-### Photon Blasts (PB) & Triggers
-*   Photon Blasts: Unleashed at 100% PB gauge. Max 3.
-*   Triggers: % chance to activate effects at 100% PB, 10% HP, or entering a Boss Room.
-*   Effects: Invincibility, Resta, or Shifta & Deband. Mags like Sato and Nidra offer 50% chance of Invincibility at 100% PB and 10% HP.
-
-## 4. Episode 4 Lore Summary (Blue Burst Exclusive)
-Episode 4 shifts the focus back to the surface of the planet Ragol after the defeat of Dark Falz and Olga Flow. 
-A massive meteor suddenly crashes onto the planet's surface, carving out the massive "Crater". Pioneer 2 immediately establishes a forward operating base to investigate the anomaly.
-
-### The Crater and Subterranean Desert
-*   **The Crater:** The meteor impact radically mutated the local flora and fauna. The area is infested with highly aggressive reptilian and insectoid bio-weapons (e.g., Astarks, Zu, Satellite Lizards).
-*   **The Subterranean Desert:** Digging below the Crater, Hunters discover an ancient, hyper-advanced underground facility buried in the sands. It predates the Pioneer project by millennia and houses ancient civilization technology.
-*   **The Meteor's Core:** The meteor wasn't just a rock; it was a cosmic vessel or seal. Slumbering within the deepest parts of the Subterranean Desert is the ancient D-Cell beast known as **Saint-Million** (or its variants, Shambertin and Kondrieu).
-
-### Black Paper & Human Conflict
-Unlike Ep1 and Ep2 which focused on D-Cell monsters, Ep4 focuses heavily on human-to-human syndicate conflict. 
-*   **Black Paper:** A dangerous underground criminal syndicate operating on Pioneer 2. Led by the highly enigmatic **Leo Grahart**, Black Paper seeks to exploit the ancient technology and meteor debris in the Subterranean Desert to overthrow the Principal and assume control of the ship.
-*   **Rupika:** A young girl with mystical connections to the ancient forces of Ragol, who becomes a central figure caught between the Hunter's Guild investigation and Black Paper's violent ambitions.
-
-### Server Info
-*   This bot supports the psobb.io private server.
-*   Feedback can be posted to the Discord forum. You can always DM @liquidSpikes as well.
