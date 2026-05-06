@@ -71,3 +71,9 @@ Characters are defined by three aspects: Profession (Hunter, Ranger, Force), Spe
 *   **Mags:** Robotic companions that boost stats (DEF, POW, DEX, MIND) and provide Photon Blasts (PB) at 100% energy.
 *   **PSOBB.io Server:** This bot supports the psobb.io community. Feedback can be sent to @liquidSpikes or via the Discord forum.
 
+
+## 7. Open Source Code & Support
+*   **Source Code:** The psobb.io project is open-source. If players ask about the codebase or how to build their own systems, direct them to the official GitHub repositories:
+    *   **Website:** https://github.com/liquidspikes/psobb.io-website-public
+    *   **Launcher:** https://github.com/liquidspikes/psobb.io-launcher
+*   **Support:** For any deep technical questions, bug reports, or server issues, players should always reach out to the **@administrators** role in Discord.
