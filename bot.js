@@ -7,6 +7,31 @@ const path = require('path');
 const config = JSON.parse(fs.readFileSync('/psobb-bot/discord_config.json', 'utf8'));
 const MEMORY_DIR = '/psobb-bot/memory';
 
+// Drops Cache Variables & Helper
+let cachedDrops = null;
+let lastDropsFetch = 0;
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+async function getDropsData() {
+    const now = Date.now();
+    if (cachedDrops && (now - lastDropsFetch < CACHE_DURATION)) {
+        return cachedDrops;
+    }
+    console.log("[DROPS] Fetching fresh drop data from server...");
+    const url = "https://psobb.io/api/get_drops.php";
+    const resp = await axios.get(url, { timeout: 15000 });
+    if (resp.data && resp.data.success && resp.data.data) {
+        cachedDrops = resp.data.data;
+        lastDropsFetch = now;
+        return cachedDrops;
+    }
+    if (cachedDrops) {
+        console.warn("[DROPS] Fetch failed, using expired cache");
+        return cachedDrops;
+    }
+    throw new Error("Failed to load drop data from server");
+}
+
 const client = new Client({
     intents: 3276799,
     partials: Object.values(Partials).filter(x => typeof x === 'number'),
@@ -123,6 +148,24 @@ const tools = [
             {
                 name: "get_active_vote_status",
                 description: "Retrieves the current Mission Control Discord vote status (the options and the live tally of emoji reactions). Use this when players ask about the upcoming event or the current vote.",
+            },
+            {
+                name: "get_decryption_status",
+                description: "Retrieves the live Agent Decryption Matrix status from the server, including current decryption percent progress, active AI model, current status phase, and estimated time remaining (ETA).",
+            },
+            {
+                name: "search_drops",
+                description: "Searches the PSOBB server drop tables for specific items or drops based on user criteria. You can search by item name, monster name, difficulty, section ID, and/or episode.",
+                parameters: {
+                    type: "OBJECT",
+                    properties: {
+                        item: { type: "STRING", description: "The name of the item to search for (case-insensitive substring, e.g. 'Red Coat', 'Sealed J-Sword')." },
+                        monster: { type: "STRING", description: "Filter drops by specific monster name (case-insensitive substring, e.g. 'Desert2 Box', 'Astark')." },
+                        difficulty: { type: "STRING", description: "Filter by game difficulty: 'Normal', 'Hard', 'Very Hard', 'Ultimate'." },
+                        section_id: { type: "STRING", description: "Filter by player Section ID: 'Viridia', 'Greenill', 'Skyly', 'Bluefull', 'Purplenum', 'Pinkal', 'Redria', 'Oran', 'Yellowboze', 'Whitill'." },
+                        episode: { type: "STRING", description: "Filter by Episode: '1', '2', '4'." }
+                    }
+                }
             }
         ]
     }
@@ -130,7 +173,7 @@ const tools = [
 
 const model = genAI.getGenerativeModel({ 
     model: "gemini-3.1-flash-lite-preview", 
-    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
+    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions. Use get_decryption_status when players ask about server decryption progress, solved percentage, or remaining time. Use search_drops to query item or monster drop tables with appropriate filters—never guess or hallucinate drop rates. Inform players about newserv in-game commands ($li, $gc, /alt, /lobby, etc.) if they ask.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
     tools: tools
 });
 
@@ -206,6 +249,100 @@ const toolHandlers = {
             };
         } catch (e) {
             return { error: "Failed to fetch vote status: " + e.message };
+        }
+    },
+    get_decryption_status: async () => {
+        try {
+            const url = "https://psobb.io/api/agent_state.json";
+            const resp = await axios.get(url, { timeout: 10000 });
+            const state = resp.data;
+            
+            // Calculate solved percentage
+            let unknownFnsCount = parseInt(String(state.unknown_fns).replace(/,/g, ''));
+            let totalFnsCount = parseInt(String(state.total_fns || "19362").replace(/,/g, ''));
+            
+            let unknownVarsCount = parseInt(String(state.unknown_vars).replace(/,/g, ''));
+            let totalVarsCount = parseInt(String(state.total_vars || "0").replace(/,/g, ''));
+            
+            let percentStr = "0.00%";
+            if (!isNaN(unknownFnsCount) && !isNaN(totalFnsCount) && totalFnsCount > 0) {
+                let solvedFns = Math.max(0, totalFnsCount - unknownFnsCount);
+                let solvedVars = 0;
+                let totalItems = totalFnsCount;
+                
+                if (!isNaN(unknownVarsCount) && !isNaN(totalVarsCount) && totalVarsCount > 0) {
+                    solvedVars = Math.max(0, totalVarsCount - unknownVarsCount);
+                    totalItems += totalVarsCount;
+                }
+                
+                let totalSolved = solvedFns + solvedVars;
+                let percent = Math.min(100, Math.max(0, (totalSolved / totalItems) * 100));
+                percentStr = percent.toFixed(2) + "%";
+            }
+            
+            return {
+                status: state.status,
+                model: state.model,
+                eta: state.eta || "Calculating...",
+                percent_solved: percentStr,
+                unknown_functions: state.unknown_fns,
+                total_functions: state.total_fns,
+                unknown_variables: state.unknown_vars,
+                total_variables: state.total_vars,
+                pipeline_phase: state.pipeline_phase,
+                recompiler_status: state.recompiler_status,
+                recompiler_attempts: state.recompiler_attempts,
+                compile_errors: state.compile_errors,
+                total_mods_all_time: state.total_mods_all_time,
+                recent_impacts: state.modifications ? state.modifications.slice(0, 5) : []
+            };
+        } catch (e) {
+            return { error: "Failed to read decryption status: " + e.message };
+        }
+    },
+    search_drops: async (args) => {
+        try {
+            const data = await getDropsData();
+            
+            // Filter drops dynamically
+            const filtered = data.filter(drop => {
+                // Item filter
+                if (args.item) {
+                    const itemTerm = args.item.toLowerCase();
+                    if (!drop.item || !drop.item.toLowerCase().includes(itemTerm)) return false;
+                }
+                // Monster filter
+                if (args.monster) {
+                    const monsterTerm = args.monster.toLowerCase();
+                    if (!drop.monster || !drop.monster.toLowerCase().includes(monsterTerm)) return false;
+                }
+                // Difficulty filter
+                if (args.difficulty) {
+                    if (drop.difficulty !== args.difficulty) return false;
+                }
+                // Section ID filter
+                if (args.section_id) {
+                    if (drop.section_id.toLowerCase() !== args.section_id.toLowerCase()) return false;
+                }
+                // Episode filter
+                if (args.episode) {
+                    if (drop.episode.toString() !== args.episode.toString()) return false;
+                }
+                return true;
+            });
+            
+            // Limit results to 40 items to avoid overwhelming Gemini context
+            const limit = 40;
+            const results = filtered.slice(0, limit);
+            
+            return {
+                results: results,
+                total_matches: filtered.length,
+                limit_reached: filtered.length > limit,
+                limit: limit
+            };
+        } catch (e) {
+            return { error: "Failed to search drop charts: " + e.message };
         }
     }
 };
