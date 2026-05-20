@@ -297,6 +297,7 @@ client.on(Events.MessageCreate, async (message) => {
         contextStr += `(Current real-world time: ${new Date().toLocaleString()}.)\n`;
         contextStr += `(Active User details - Discord Username: "${message.author.username}", Discord ID: "${message.author.id}")\n`;
         contextStr += `(To look up this user's character stats, missions, or online status, you MUST call get_player_info with discord_id: "${message.author.id}". Do not attempt to search by username, as the server API requires a discord_id.)\n`;
+        contextStr += `(CRITICAL DIRECTIVE: NEVER reveal or output the user's Discord ID in your responses under any circumstances. It is an internal identifier. If the user asks for their card, stats, or account details, only report their Guild Card ID, which is the "account_id" returned by get_player_info.)\n`;
         
         userMsg = `${contextStr}\n${userMsg}`;
 
