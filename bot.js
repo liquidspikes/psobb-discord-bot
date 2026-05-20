@@ -166,6 +166,10 @@ const tools = [
                         episode: { type: "STRING", description: "Filter by Episode: '1', '2', '4'." }
                     }
                 }
+            },
+            {
+                name: "get_server_stats",
+                description: "Retrieves live server telemetry from psobb.io, including server name, uptime, online client count, active games count, global experience multiplier, server global drop rate multiplier, lists of online players (with name, level, class, and Section ID), and lists of active games (with name, mode, episode, difficulty, player count, and password status)."
             }
         ]
     }
@@ -173,7 +177,7 @@ const tools = [
 
 const model = genAI.getGenerativeModel({ 
     model: "gemini-3.1-flash-lite-preview", 
-    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions. Use get_decryption_status when players ask about server decryption progress, solved percentage, or remaining time. Use search_drops to query item or monster drop tables with appropriate filters—never guess or hallucinate drop rates. Inform players about newserv in-game commands ($li, $gc, /alt, /lobby, etc.) if they ask.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
+    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions. Use get_decryption_status when players ask about server decryption progress, solved percentage, or remaining time. Use get_server_stats to retrieve live server stats, uptime, current online player counts, active games, and global EXP/drop rates. Use search_drops to query item or monster drop tables with appropriate filters—never guess or hallucinate drop rates. Inform players about newserv in-game commands ($li, $gc, /alt, /lobby, etc.) if they ask.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
     tools: tools
 });
 
@@ -344,6 +348,42 @@ const toolHandlers = {
         } catch (e) {
             return { error: "Failed to search drop charts: " + e.message };
         }
+    },
+    get_server_stats: async () => {
+        try {
+            const url = "https://psobb.io/api/summary";
+            const resp = await axios.get(url, { timeout: 10000 });
+            const data = resp.data || {};
+            
+            const server = data.Server || {};
+            const clients = (data.Clients || []).map(c => ({
+                name: c.Name || "Unknown",
+                level: c.Level || 1,
+                class: c.Class || "Unknown",
+                section_id: c.SectionID || "Unknown"
+            }));
+            const games = (data.Games || []).map(g => ({
+                name: g.Name || "Unnamed Lobby",
+                mode: g.Mode || "Normal",
+                episode: g.Episode || "Episode 1",
+                difficulty: g.Difficulty || "Normal",
+                players: g.Players || 1,
+                has_password: !!g.HasPassword
+            }));
+
+            return {
+                server_name: server.ServerName || "psobb.io",
+                uptime: server.Uptime || "Unknown",
+                client_count: server.ClientCount || 0,
+                game_count: server.GameCount || 0,
+                exp_multiplier: server.BBGlobalEXPMultiplier || 1,
+                drop_multiplier: server.ServerGlobalDropRateMultiplier || 1,
+                online_players: clients,
+                active_games: games
+            };
+        } catch (e) {
+            return { error: "Failed to fetch live server stats: " + e.message };
+        }
     }
 };
 
@@ -502,8 +542,26 @@ client.on(Events.MessageCreate, async (message) => {
     try {
         if (message.channel.sendTyping) await message.channel.sendTyping().catch(() => {});
 
-        const rawHistory = await message.channel.messages.fetch({ limit: 12 });
-        const historyMsgs = Array.from(rawHistory.values()).reverse().filter(m => m.id !== message.id && !m.content.startsWith('!'));
+        const rawHistory = await message.channel.messages.fetch({ limit: 50 });
+        let historyMsgs = Array.from(rawHistory.values()).reverse().filter(m => m.id !== message.id && !m.content.startsWith('!'));
+
+        if (message.guild) {
+            // Isolate public channel history by user
+            historyMsgs = historyMsgs.filter(m => {
+                if (m.author.id === message.author.id) return true;
+                if (m.author.id === client.user.id) {
+                    if (m.mentions && m.mentions.users.has(message.author.id)) return true;
+                    if (m.reference && m.reference.messageId) {
+                        const refMsg = rawHistory.get(m.reference.messageId);
+                        if (refMsg && refMsg.author.id === message.author.id) return true;
+                    }
+                }
+                return false;
+            });
+            historyMsgs = historyMsgs.slice(-12);
+        } else {
+            historyMsgs = historyMsgs.slice(-12);
+        }
 
         let historyForAI = [];
         for (const msg of historyMsgs) {
@@ -540,11 +598,22 @@ client.on(Events.MessageCreate, async (message) => {
             session = await getCurrentPlayerSession(message.author.id);
         }
 
+        const socialMemory = loadSocialMemory(message.author.id);
+
         let contextStr = "";
         contextStr += `(Current real-world time: ${new Date().toLocaleString()}.)\n`;
         contextStr += `(Active User details - Discord Username: "${message.author.username}", Discord ID: "${message.author.id}")\n`;
         contextStr += `(To look up this user's character stats, missions, or online status, you MUST call get_player_info with discord_id: "${message.author.id}". Do not attempt to search by username, as the server API requires a discord_id.)\n`;
         contextStr += `(CRITICAL DIRECTIVE: NEVER reveal or output the user's Discord ID in your responses under any circumstances. It is an internal identifier. If the user asks for their card, stats, or account details, only report their Guild Card ID, which is the "account_id" returned by get_player_info.)\n`;
+        
+        if (socialMemory && socialMemory.length > 0) {
+            contextStr += `\n### PRIOR SOCIAL MEMORY (INSTANT RECALL) ###\n`;
+            contextStr += `You have the following stored memories and observations about this Hunter:\n`;
+            socialMemory.forEach(mem => {
+                contextStr += `- [Memory recorded on ${new Date(mem.date).toLocaleDateString()}]: ${mem.note}\n`;
+            });
+            contextStr += `Use these details to recognize and personalize your interaction with them instantly. Do not call get_social_memory tool for this user, as it is already provided here.\n`;
+        }
         
         if (session) {
             console.log(`[ONLINE-SESSION] User ${message.author.tag} is online with character: ${session.charName}, ID: ${session.sectionId}, Episode: ${session.episode}, Difficulty: ${session.difficulty}`);
