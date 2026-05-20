@@ -150,6 +150,10 @@ const tools = [
                 description: "Retrieves the current Mission Control Discord vote status (the options and the live tally of emoji reactions). Use this when players ask about the upcoming event or the current vote.",
             },
             {
+                name: "get_recent_votes",
+                description: "Retrieves information about recent Mission Control votes, including the current active vote (with options and live reaction tallies) and the previously completed vote (with its candidates and the winning scenario details). Use this when players ask about past votes, recent votes, or previous winners."
+            },
+            {
                 name: "get_decryption_status",
                 description: "Retrieves the live Agent Decryption Matrix status from the server, including current decryption percent progress, active AI model, current status phase, and estimated time remaining (ETA).",
             },
@@ -177,7 +181,7 @@ const tools = [
 
 const model = genAI.getGenerativeModel({ 
     model: "gemini-3.1-flash-lite-preview", 
-    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). If get_player_info returns that a user is not linked (e.g. 'Not linked'), you MUST instruct them to sign into https://psobb.io/login and link their Discord account in their player dashboard. You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions. Use get_decryption_status when players ask about server decryption progress, solved percentage, or remaining time. Use get_server_stats to retrieve live server stats, uptime, current online player counts, active games, and global EXP/drop rates. Use search_drops to query item or monster drop tables with appropriate filters—never guess or hallucinate drop rates. Inform players about newserv in-game commands ($li, $gc, /alt, /lobby, etc.) if they ask.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
+    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). If get_player_info returns that a user is not linked (e.g. 'Not linked'), you MUST instruct them to sign into https://psobb.io/login and link their Discord account in their player dashboard. You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. Use get_recent_votes when players ask about past, previous, or recent votes or winners of Mission Control votes. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions. Use get_decryption_status when players ask about server decryption progress, solved percentage, or remaining time. Use get_server_stats to retrieve live server stats, uptime, current online player counts, active games, and global EXP/drop rates. Use search_drops to query item or monster drop tables with appropriate filters—never guess or hallucinate drop rates. Inform players about newserv in-game commands ($li, $gc, /alt, /lobby, etc.) if they ask.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
     tools: tools
 });
 
@@ -253,6 +257,67 @@ const toolHandlers = {
             };
         } catch (e) {
             return { error: "Failed to fetch vote status: " + e.message };
+        }
+    },
+    get_recent_votes: async () => {
+        try {
+            const results = {};
+            
+            // 1. Fetch current active vote (if exists)
+            const voteFile = '/home/alexzimmerman/gemini-psobb-scripts/current_vote.json';
+            if (fs.existsSync(voteFile)) {
+                try {
+                    const voteData = JSON.parse(fs.readFileSync(voteFile, 'utf8'));
+                    const channelId = config.channel_id;
+                    const messageId = voteData.message_id;
+                    
+                    const channel = await client.channels.fetch(channelId);
+                    if (channel) {
+                        const targetMessage = await channel.messages.fetch(messageId);
+                        if (targetMessage) {
+                            const tally = {};
+                            targetMessage.reactions.cache.forEach(reaction => {
+                                tally[reaction.emoji.name] = reaction.count;
+                            });
+                            results.active_vote = {
+                                event_date: voteData.date,
+                                candidates: voteData.candidates,
+                                current_votes: tally
+                            };
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error loading active vote:", e.message);
+                }
+            }
+            
+            // 2. Fetch previously completed / applied vote
+            const appliedVoteFile = '/home/alexzimmerman/gemini-psobb-scripts/current_vote.json.applied';
+            const appliedEventFile = '/home/alexzimmerman/gemini-psobb-scripts/pending_event.json.applied';
+            
+            if (fs.existsSync(appliedVoteFile) && fs.existsSync(appliedEventFile)) {
+                try {
+                    const appliedVote = JSON.parse(fs.readFileSync(appliedVoteFile, 'utf8'));
+                    const appliedEvent = JSON.parse(fs.readFileSync(appliedEventFile, 'utf8'));
+                    
+                    results.previous_vote = {
+                        event_date: appliedVote.date,
+                        candidates: appliedVote.candidates,
+                        winner: {
+                            id: appliedEvent.scenario_id,
+                            title: appliedEvent.title,
+                            desc: appliedEvent.desc,
+                            selection_method: appliedEvent.selection_method
+                        }
+                    };
+                } catch (e) {
+                    console.error("Error loading applied vote:", e.message);
+                }
+            }
+            
+            return results;
+        } catch (e) {
+            return { error: "Failed to retrieve recent votes: " + e.message };
         }
     },
     get_decryption_status: async () => {
