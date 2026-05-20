@@ -365,6 +365,109 @@ client.once(Events.ClientReady, (c) => {
     console.log("[READY] Bot is live: " + c.user.tag);
 });
 
+function extractActiveSession(playerInfo) {
+    if (!playerInfo || !playerInfo.is_online) return null;
+    
+    // Check if there is an explicit session object
+    const session = playerInfo.session || playerInfo.online_session || {};
+    
+    // Extract difficulty and episode
+    let difficulty = session.difficulty || session.Difficulty || playerInfo.difficulty || playerInfo.Difficulty || null;
+    let episode = session.episode || session.Episode || playerInfo.episode || playerInfo.Episode || null;
+    
+    // Extract character details
+    let activeChar = null;
+    const chars = playerInfo.Characters || playerInfo.characters || [];
+    
+    // Try matching by LastPlayerName
+    const lastPlayerName = playerInfo.LastPlayerName || playerInfo.last_player_name || session.character_name || session.CharacterName;
+    if (lastPlayerName && chars.length > 0) {
+        activeChar = chars.find(c => {
+            const cName = c.name || c.Name || c.character_name || c.CharacterName;
+            return cName && cName.toLowerCase() === lastPlayerName.toLowerCase();
+        });
+    }
+    
+    // If not found, try finding one marked active, or default to the first character
+    if (!activeChar && chars.length > 0) {
+        activeChar = chars.find(c => c.is_active || c.isActive || c.active || c.Active) || chars[0];
+    }
+    
+    // Extract section ID from active character or session or root
+    let sectionId = null;
+    if (activeChar) {
+        sectionId = activeChar.section_id || activeChar.SectionID || activeChar.sectionId || activeChar.Section_ID || activeChar.section || activeChar.Section;
+    }
+    if (!sectionId) {
+        sectionId = session.section_id || session.SectionID || session.sectionId || playerInfo.section_id || playerInfo.SectionID || playerInfo.sectionId;
+    }
+    
+    // Extract other char info
+    const charName = activeChar ? (activeChar.name || activeChar.Name) : lastPlayerName;
+    const charClass = activeChar ? (activeChar.class || activeChar.Class) : null;
+    const charLevel = activeChar ? (activeChar.level || activeChar.Level) : null;
+    
+    // Normalize Section ID
+    if (sectionId && typeof sectionId === 'string') {
+        sectionId = sectionId.charAt(0).toUpperCase() + sectionId.slice(1).toLowerCase();
+        const validSectionIds = ['Viridia', 'Greenill', 'Skyly', 'Bluefull', 'Purplenum', 'Pinkal', 'Redria', 'Oran', 'Yellowboze', 'Whitill'];
+        if (!validSectionIds.includes(sectionId)) {
+            sectionId = null;
+        }
+    } else if (sectionId !== null && sectionId !== undefined) {
+        const sectionIdMap = {
+            0: 'Viridia', 1: 'Greenill', 2: 'Skyly', 3: 'Bluefull', 4: 'Purplenum',
+            5: 'Pinkal', 6: 'Redria', 7: 'Oran', 8: 'Yellowboze', 9: 'Whitill'
+        };
+        sectionId = sectionIdMap[sectionId] || null;
+    }
+    
+    // Normalize Difficulty
+    if (difficulty && typeof difficulty === 'string') {
+        difficulty = difficulty.charAt(0).toUpperCase() + difficulty.slice(1).toLowerCase();
+        if (difficulty === 'Vhard' || difficulty === 'Veryhard') difficulty = 'Very Hard';
+        const validDiffs = ['Normal', 'Hard', 'Very Hard', 'Ultimate'];
+        if (!validDiffs.includes(difficulty)) {
+            difficulty = null;
+        }
+    } else if (difficulty !== null && difficulty !== undefined) {
+        const diffMap = { 0: 'Normal', 1: 'Hard', 2: 'Very Hard', 3: 'Ultimate' };
+        difficulty = diffMap[difficulty] || null;
+    }
+    
+    // Normalize Episode
+    if (episode !== null && episode !== undefined) {
+        const epStr = String(episode).replace(/[^0-9]/g, '');
+        if (['1', '2', '4'].includes(epStr)) {
+            episode = epStr;
+        } else {
+            episode = null;
+        }
+    }
+    
+    return {
+        is_online: true,
+        difficulty,
+        episode,
+        sectionId,
+        charName,
+        charClass,
+        charLevel
+    };
+}
+
+async function getCurrentPlayerSession(discordId) {
+    try {
+        const playerInfo = await apiCall("get_player", { discord_id: discordId });
+        if (playerInfo && playerInfo.is_online) {
+            return extractActiveSession(playerInfo);
+        }
+    } catch (e) {
+        console.error("[SESSION CHECK ERROR]", e.message);
+    }
+    return null;
+}
+
 const handledMessages = new Set();
 
 client.on(Events.MessageCreate, async (message) => {
@@ -430,11 +533,30 @@ client.on(Events.MessageCreate, async (message) => {
 
         let userMsg = `[${message.author.username} (ID: ${message.author.id})]: ${message.content}`;
         
+        let session = null;
+        const dropKeywords = /\b(drop|drops|rate|rates|find|loot|farm|monster|pouilly|slime|slimes|dropchart|chart|table|tables)\b|where\s+can\s+I\s+find|how\s+do\s+I\s+get/i;
+        if (dropKeywords.test(message.content)) {
+            console.log(`[DROPS-DETECTED] User ${message.author.tag} asked about drops. Fetching online status...`);
+            session = await getCurrentPlayerSession(message.author.id);
+        }
+
         let contextStr = "";
         contextStr += `(Current real-world time: ${new Date().toLocaleString()}.)\n`;
         contextStr += `(Active User details - Discord Username: "${message.author.username}", Discord ID: "${message.author.id}")\n`;
         contextStr += `(To look up this user's character stats, missions, or online status, you MUST call get_player_info with discord_id: "${message.author.id}". Do not attempt to search by username, as the server API requires a discord_id.)\n`;
         contextStr += `(CRITICAL DIRECTIVE: NEVER reveal or output the user's Discord ID in your responses under any circumstances. It is an internal identifier. If the user asks for their card, stats, or account details, only report their Guild Card ID, which is the "account_id" returned by get_player_info.)\n`;
+        
+        if (session) {
+            console.log(`[ONLINE-SESSION] User ${message.author.tag} is online with character: ${session.charName}, ID: ${session.sectionId}, Episode: ${session.episode}, Difficulty: ${session.difficulty}`);
+            contextStr += `\n### CURRENT GAMEPLAY CONTEXT (ONLINE NOW) ###\n`;
+            contextStr += `The player is currently online and playing on the server!\n`;
+            contextStr += `- Active Character: "${session.charName}"${session.charLevel ? ` (Level ${session.charLevel} ${session.charClass || ''})` : ''}\n`;
+            if (session.sectionId) contextStr += `- Section ID: "${session.sectionId}"\n`;
+            if (session.episode) contextStr += `- Current Episode: "${session.episode}"\n`;
+            if (session.difficulty) contextStr += `- Current Difficulty: "${session.difficulty}"\n`;
+            contextStr += `\n### DIRECTIVE FOR DROPS SEARCH ###\n`;
+            contextStr += `Since the player is currently online, you MUST use their active gameplay parameters (Section ID: "${session.sectionId || 'None'}", Episode: "${session.episode || 'None'}", Difficulty: "${session.difficulty || 'None'}") as the starting point and default search filters when querying drop tables via the "search_drops" tool. ONLY override these defaults if the user explicitly specifies a different section ID, episode, difficulty, or asks a specific question about a specific item/monster drop rate in general.\n`;
+        }
         
         userMsg = `${contextStr}\n${userMsg}`;
 
