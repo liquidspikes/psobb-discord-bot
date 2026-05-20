@@ -39,26 +39,26 @@ try {
 }
 
 // Social Memory Helpers
-function getMemoryPath(username) {
-    const safeName = username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    return path.join(MEMORY_DIR, `${safeName}.json`);
+function getMemoryPath(discordId) {
+    const safeId = discordId.replace(/[^0-9]/g, '');
+    return path.join(MEMORY_DIR, `${safeId}.json`);
 }
 
-function loadSocialMemory(username) {
+function loadSocialMemory(discordId) {
     try {
-        const memPath = getMemoryPath(username);
+        const memPath = getMemoryPath(discordId);
         if (fs.existsSync(memPath)) {
             return JSON.parse(fs.readFileSync(memPath, 'utf8'));
         }
-    } catch (e) { console.error(`Memory load error for ${username}:`, e.message); }
+    } catch (e) { console.error(`Memory load error for ID ${discordId}:`, e.message); }
     return [];
 }
 
-function saveSocialMemory(username, memoryArray) {
+function saveSocialMemory(discordId, memoryArray) {
     try {
-        const memPath = getMemoryPath(username);
+        const memPath = getMemoryPath(discordId);
         fs.writeFileSync(memPath, JSON.stringify(memoryArray, null, 2));
-    } catch (e) { console.error(`Memory save error for ${username}:`, e.message); }
+    } catch (e) { console.error(`Memory save error for ID ${discordId}:`, e.message); }
 }
 
 const genAI = new GoogleGenerativeAI(config.gemini_api_key);
@@ -69,13 +69,13 @@ const tools = [
         functionDeclarations: [
             {
                 name: "get_player_info",
-                description: "Retrieves detailed information about a player, including their characters, level, class, online status, team, and mission progress. Pass either a discord_id or a website username.",
+                description: "Retrieves detailed information about a player, including their characters, level, class, online status, team, and mission progress. Pass the Discord ID of the player.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
-                        discord_id: { type: "STRING", description: "The Discord ID of the player." },
-                        username: { type: "STRING", description: "The website username of the player." }
-                    }
+                        discord_id: { type: "STRING", description: "The Discord ID of the player." }
+                    },
+                    required: ["discord_id"]
                 }
             },
             {
@@ -103,21 +103,21 @@ const tools = [
                 parameters: {
                     type: "OBJECT",
                     properties: {
-                        username: { type: "STRING", description: "The username the note is about." },
+                        discord_id: { type: "STRING", description: "The Discord ID of the player the note is about." },
                         note: { type: "STRING", description: "The information to remember (e.g., 'Friends with user X', 'Obsessed with finding Sealed J-Sword')." }
                     },
-                    required: ["username", "note"]
+                    required: ["discord_id", "note"]
                 }
             },
             {
                 name: "get_social_memory",
-                description: "Retrieves the bot's stored social notes about a specific user.",
+                description: "Retrieves the bot's stored social notes about a specific user by their Discord ID.",
                 parameters: {
                     type: "OBJECT",
                     properties: {
-                        username: { type: "STRING", description: "The username to look up." }
+                        discord_id: { type: "STRING", description: "The Discord ID of the user to look up." }
                     },
-                    required: ["username"]
+                    required: ["discord_id"]
                 }
             },
             {
@@ -130,7 +130,7 @@ const tools = [
 
 const model = genAI.getGenerativeModel({ 
     model: "gemini-3.1-flash-lite-preview", 
-    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). Use social memory tools to track and recall dynamics. Use get_active_vote_status to check the current Mission Control event vote tallies.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
+    systemInstruction: config.system_prompt + "\n\n### STRATEGIC DIRECTIVE ###\nPrioritize local data from the KNOWLEDGE BASE and provided tools. Use get_player_info to check levels—be KIND to new players (Lvl 1-20), and SASSY to veterans (Lvl 100+). You MUST use the update_social_memory tool to record any new facts, preferences, or relationships about a player whenever they interact with you. Use get_active_vote_status to check the current Mission Control event vote tallies. NEVER say the bounty system doesn't exist; ALWAYS use fetch_website_content with path '/missions.php' to check active bounties and missions.\n\n### KNOWLEDGE BASE ###\n" + knowledgeBase,
     tools: tools
 });
 
@@ -168,14 +168,14 @@ const toolHandlers = {
         } catch (e) { return { error: "Failed to read website: " + e.message }; }
     },
     update_social_memory: async (args) => {
-        const memoryArray = loadSocialMemory(args.username);
+        const memoryArray = loadSocialMemory(args.discord_id);
         memoryArray.push({ date: new Date().toISOString(), note: args.note });
         if (memoryArray.length > 20) memoryArray.shift(); // Keep last 20 notes per user
-        saveSocialMemory(args.username, memoryArray);
-        return { success: true, message: `Recorded note for ${args.username}` };
+        saveSocialMemory(args.discord_id, memoryArray);
+        return { success: true, message: `Recorded note for ID ${args.discord_id}` };
     },
     get_social_memory: async (args) => {
-        const memoryArray = loadSocialMemory(args.username);
+        const memoryArray = loadSocialMemory(args.discord_id);
         if (memoryArray.length === 0) return { info: "No prior social notes found for this user." };
         return memoryArray;
     },
@@ -231,7 +231,7 @@ client.once(Events.ClientReady, (c) => {
 const handledMessages = new Set();
 
 client.on(Events.MessageCreate, async (message) => {
-    if (!message || handledMessages.has(message.id)) return;
+    if (!message || message.system || handledMessages.has(message.id)) return;
     handledMessages.add(message.id);
     if (handledMessages.size > 1000) handledMessages.clear();
 
@@ -243,9 +243,21 @@ client.on(Events.MessageCreate, async (message) => {
     const isConfigChannel = message.channel.id === config.channel_id;
 
     if (!isDM && !isMentioned && !isCommand && !isConfigChannel) return;
-    if (isCommand && !message.content.startsWith('!stats')) return;
+    if (isCommand) {
+        if (message.content.startsWith('!quest') || message.content.startsWith('$quest')) {
+            return await message.reply("📡 **Notice:** The manual `!quest` command has been deprecated. Mission Command now monitors your progress automatically! You will receive random bounties directly to your Guild Card while playing on the server.");
+        }
+        if (!message.content.startsWith('!stats')) return;
+    }
 
     console.log("[MSG] From: " + message.author.tag + " | Content: " + message.content);
+
+    try {
+        const logLine = `[${new Date().toISOString()}] ${message.author.tag}: ${message.content}\n`;
+        fs.appendFileSync(path.join(MEMORY_DIR, 'questions.log'), logLine);
+    } catch (e) {
+        console.error("Failed to append to questions.log:", e.message);
+    }
 
     try {
         if (message.channel.sendTyping) await message.channel.sendTyping().catch(() => {});
@@ -257,7 +269,7 @@ client.on(Events.MessageCreate, async (message) => {
         for (const msg of historyMsgs) {
             historyForAI.push({
                 role: msg.author.id === client.user.id ? 'model' : 'user',
-                parts: [{ text: `[${msg.author.username}]: ${msg.content}` }]
+                parts: [{ text: `[${msg.author.username} (ID: ${msg.author.id})]: ${msg.content}` }]
             });
         }
 
@@ -271,7 +283,7 @@ client.on(Events.MessageCreate, async (message) => {
         let validHistory = [];
         for (const h of historyForAI) {
             if (validHistory.length > 0 && validHistory[validHistory.length - 1].role === h.role) {
-                validHistory[validHistory.length - 1].parts[0].text += "\\n" + h.parts[0].text;
+                validHistory[validHistory.length - 1].parts[0].text += "\n" + h.parts[0].text;
             } else {
                 validHistory.push(h);
             }
@@ -279,10 +291,12 @@ client.on(Events.MessageCreate, async (message) => {
 
         const chat = model.startChat({ history: validHistory });
 
-        let userMsg = message.content;
+        let userMsg = `[${message.author.username} (ID: ${message.author.id})]: ${message.content}`;
         
         let contextStr = "";
-        contextStr += `(Current real-world time: ${new Date().toLocaleString()}.)`;
+        contextStr += `(Current real-world time: ${new Date().toLocaleString()}.)\n`;
+        contextStr += `(Active User details - Discord Username: "${message.author.username}", Discord ID: "${message.author.id}")\n`;
+        contextStr += `(To look up this user's character stats, missions, or online status, you MUST call get_player_info with discord_id: "${message.author.id}". Do not attempt to search by username, as the server API requires a discord_id.)\n`;
         
         userMsg = `${contextStr}\n${userMsg}`;
 
@@ -309,8 +323,23 @@ client.on(Events.MessageCreate, async (message) => {
         }
 
         const responseText = response.text();
+        const splitText = (text, maxLength) => {
+            if (text.length <= maxLength) return [text];
+            const chunks = [];
+            let currentText = text;
+            while (currentText.length > maxLength) {
+                let splitIndex = currentText.lastIndexOf('\n', maxLength);
+                if (splitIndex === -1) splitIndex = currentText.lastIndexOf(' ', maxLength);
+                if (splitIndex === -1) splitIndex = maxLength;
+                chunks.push(currentText.substring(0, splitIndex));
+                currentText = currentText.substring(splitIndex).trimStart();
+            }
+            chunks.push(currentText);
+            return chunks;
+        };
+
         if (responseText.length > 2000) {
-            const chunks = responseText.match(/[\s\S]{1,2000}/g) || [];
+            const chunks = splitText(responseText, 1950);
             for (const chunk of chunks) await message.reply(chunk);
         } else if (responseText.trim()) {
             await message.reply(responseText);
