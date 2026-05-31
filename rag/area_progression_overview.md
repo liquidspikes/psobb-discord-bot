@@ -1,27 +1,35 @@
 # PSOBB Area Progression Overview
 
-Area progression on this server follows the classic **Phantasy Star Online Blue Burst (PSOBB)** progression system where area gates are unlocked via Government Quests.
+On our server, we have simplified area progression to improve the player experience while maintaining server integrity.
 
-## 🔓 Quick Reference Area Unlock Map
+## 🔓 Current Area Warp Access
 
-Complete these specific **Government Quests** to permanently unlock their respective areas for your character:
+Almost all warp gates are **unlocked instantly** for all characters and difficulties, allowing you to jump into free-play games immediately without needing to complete previous areas or quests.
 
-| Episode | Target Area | Required Government Quest |
-| :--- | :--- | :--- |
-| **Episode 1** | **Caves** | **Government Task 1-3** |
-| **Episode 1** | **Mines** | **Government Task 2-4** |
-| **Episode 1** | **Ruins** | **Government Task 3-3** |
-| **Episode 2** | **VR Spaceship** | **Government Task 5-5** |
-| **Episode 2** | **Central Control Area (CCA)** | **Government Task 6-5** |
-| **Episode 2** | **Seabed** | **Government Task 7-5** |
-| **Episode 4** | **Crater West** | **Government Task 9-1** |
-| **Episode 4** | **Crater South**| **Government Task 9-2** |
-| **Episode 4** | **Crater North**| **Government Task 9-3** |
-| **Episode 4** | **Crater Interior**| **Government Task 9-4** |
-| **Episode 4** | **Subterranean Desert**| **Government Task 9-5** |
+| Episode | Area | Status | Requirement |
+| :--- | :--- | :--- | :--- |
+| **Episode 1** | **Caves** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 1** | **Mines** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 1** | **Ruins** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 2** | **VR Spaceship** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 2** | **Central Control Area (CCA)** | 🔒 **Locked** | **Complete Government Quest 6-5** (Sets flag `F_0225`) |
+| **Episode 2** | **Seabed** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 4** | **Crater West** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 4** | **Crater South** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 4** | **Crater North** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 4** | **Crater Interior** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
+| **Episode 4** | **Subterranean Desert** | 🔓 **Instantly Unlocked** | None (Free Play is open immediately) |
 
-## ⚙️ Core Mechanics
-* **Free Play clears do not unlock areas** (e.g. killing the Dragon in Free Play does not unlock Caves).
-* You must clear the respective Government Quest in a lobby of type **Government Quest** to trigger the unlock flags (`gget`/`gset`).
-* Speak to the **Principal NPC** (Ep 1 & 4) or the **Lab President NPC** (Ep 2) in Pioneer 2 to start these quests.
-* Quest progress is shared for **all active party members** who meet the prerequisites when the quest is successfully cleared.
+---
+
+## ⚙️ Why is the CCA Warp Locked?
+
+The **Central Control Area (CCA)** warp gate remains strictly locked behind Government Quest 6-5 completion to protect the server and prevent players from exploiting the "CCA door bypass/boss farming" exploit. 
+
+* **To Access CCA**: You must progress through the Episode 2 Government Quests and successfully clear **Government Quest 6-5** in a Government lobby. Once cleared, the warp flag is set for your character and the warp gate opens on that difficulty.
+
+---
+
+## ⚔️ Quest Progression & General Play
+* Complete Government Quests by speaking to the **Principal NPC** (Episodes 1 & 4) or the **Lab President NPC** (Episode 2) in Pioneer 2.
+* Government Quest completion progress is shared with all active party members who meet the prerequisites when the quest is successfully cleared.
