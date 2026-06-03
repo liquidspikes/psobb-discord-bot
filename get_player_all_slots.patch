@@ -1,0 +1,181 @@
+diff --git a/api/bot_api.php b/api/bot_api.php
+index f9ec649..678182e 100644
+--- a/api/bot_api.php
++++ b/api/bot_api.php
+@@ -65,11 +65,21 @@ if ($action === 'link') {
+     $url = $NEWSERV_API_URL . "/y/accounts";
+     $data = @file_get_contents($url);
+     $response_data = ["website_username" => $user['username'], "account_id" => $user['account_id'], "is_online" => false, "Characters" => [], "website_stats" => []];
+-    
++
++    // Candidate BB usernames used to build the .psochar save-file names below.
++    $bbUsernames = [];
++    if (!empty($user['username'])) $bbUsernames[] = strtolower(trim($user['username']));
++
+     if ($data) {
+         $accounts = json_decode($data, true);
+         foreach ($accounts as $acc) {
+             if ($acc['AccountID'] == $user['account_id']) {
++                if (!empty($acc['username'])) $bbUsernames[] = strtolower(trim($acc['username']));
++                if (!empty($acc['BBLicenses']) && is_array($acc['BBLicenses'])) {
++                    foreach ($acc['BBLicenses'] as $lic) {
++                        if (!empty($lic['UserName'])) $bbUsernames[] = strtolower(trim($lic['UserName']));
++                    }
++                }
+                 unset($acc['BBLicenses']);
+                 unset($acc['GCLicenses']);
+                 $response_data = array_merge($response_data, $acc);
+@@ -77,26 +87,137 @@ if ($action === 'link') {
+             }
+         }
+     }
+-    
+-    // Fetch live character stats if online
++
++    // The /y/accounts merge may carry only a partial character list (the classic 4
++    // slots). Rebuild the full list from the player's save files so EVERY slot the
++    // account owns is returned (newserv supports up to 20 slots). Keep the partial
++    // list as a fallback so we never return FEWER characters than before in case the
++    // save-file directory can't be read.
++    $fallbackChars = (isset($response_data['Characters']) && is_array($response_data['Characters']))
++        ? $response_data['Characters'] : [];
++    $response_data['Characters'] = [];
++
++    $playersDir = '/opt/newserv/system/players/';
++    if (!is_dir($playersDir)) {
++        $playersDir = __DIR__ . '/../../newserv/system/players/';
++    }
++
++    // Binary maps — must match the .psochar encoding (see character_viewer.php).
++    $CLASS_MAP = [
++        0 => 'HUmar', 1 => 'HUnewearl', 2 => 'HUcast', 3 => 'RAmar',
++        4 => 'RAcast', 5 => 'RAcaseal', 6 => 'FOmarl', 7 => 'FOnewm',
++        8 => 'FOnewearl', 9 => 'HUcaseal', 10 => 'FOmar', 11 => 'RAmarl'
++    ];
++    $SECID_MAP = [
++        0 => 'Viridia', 1 => 'Greenill', 2 => 'Skyly', 3 => 'Bluefull',
++        4 => 'Purplenum', 5 => 'Pinkal', 6 => 'Redria', 7 => 'Oran',
++        8 => 'Yellowboze', 9 => 'Whitill'
++    ];
++
++    // Case-insensitive save-file resolver (matches character_viewer.php behaviour).
++    $resolveCharFile = function ($dir, $filename) {
++        $full = $dir . $filename;
++        if (file_exists($full)) return $full;
++        if (is_dir($dir)) {
++            foreach (scandir($dir) as $f) {
++                if (strcasecmp($f, $filename) === 0) return $dir . $f;
++            }
++        }
++        return null;
++    };
++
++    $bbUsernames = array_values(array_unique(array_filter($bbUsernames)));
++    $seenChars = [];
++    foreach ($bbUsernames as $u) {
++        for ($slot = 0; $slot < 20; $slot++) {
++            $path = $resolveCharFile($playersDir, "player_{$u}_{$slot}.psochar");
++            if (!$path) continue;
++            $charData = @file_get_contents($path);
++            if ($charData === false || strlen($charData) < 0x399C) continue;
++
++            // Display block (stats + visual + name): offset 852, size 400.
++            $disp   = substr($charData, 852, 400);
++            $lvl    = unpack('V', substr($disp, 24, 4))[1];   // stored level is 0-based
++            $exp    = unpack('V', substr($disp, 28, 4))[1];
++            $meseta = unpack('V', substr($disp, 32, 4))[1];
++            $secId  = ord($disp[36 + 0x30]);
++            $clsId  = ord($disp[36 + 0x31]);
++
++            // UTF-16LE name at offset 116 (+4 to skip \t + language marker), 28 bytes.
++            $nameBytes = substr($disp, 116 + 4, 28);
++            $charName = mb_convert_encoding($nameBytes, 'UTF-8', 'UTF-16LE');
++            $charName = trim(str_replace("\x00", "", $charName));
++
++            $playTime = (strlen($charData) >= (8 + 0x04E8 + 4))
++                ? unpack('V', substr($charData, 8 + 0x04E8, 4))[1] : 0;
++
++            $key = strtolower($charName) . '|' . $slot;
++            if (isset($seenChars[$key])) continue;  // de-dupe across username aliases
++            $seenChars[$key] = true;
++
++            $response_data['Characters'][] = [
++                "Slot" => $slot,
++                "Name" => $charName,
++                "Level" => $lvl + 1,
++                "Class" => $CLASS_MAP[$clsId] ?? 'HUmar',
++                "SectionID" => $SECID_MAP[$secId] ?? 'Viridia',
++                "EXP" => $exp,
++                "Meseta" => $meseta,
++                "PlayTimeSeconds" => $playTime,
++                "is_active" => false
++            ];
++        }
++    }
++
++    // If no save files were readable, fall back to the partial /y/accounts list so the
++    // bot still gets whatever characters it would have received before this change.
++    if (empty($response_data['Characters']) && !empty($fallbackChars)) {
++        $response_data['Characters'] = $fallbackChars;
++    }
++
++    // Reconcile with live online state: overlay fresh stats on the active character
++    // (or add it if its save file wasn't found), and flag the account as online.
+     $clients_url = $NEWSERV_API_URL . "/y/clients";
+     $clients_data = @file_get_contents($clients_url);
+     if ($clients_data) {
+         $clients = json_decode($clients_data, true);
+-        foreach ($clients as $client) {
+-            if (isset($client['Account']['AccountID']) && $client['Account']['AccountID'] == $user['account_id']) {
+-                $response_data['is_online'] = true;
+-                // Add the active character to the list
+-                if (isset($client['Name'])) {
+-                    $response_data['Characters'][] = [
+-                        "Name" => $client['Name'],
+-                        "Level" => $client['Level'] ?? 1,
+-                        "Class" => $client['CharClass'] ?? 'Unknown',
+-                        "Meseta" => $client['Meseta'] ?? 0,
+-                        "PlayTimeSeconds" => $client['PlayTimeSeconds'] ?? 0,
+-                        "EXP" => $client['EXP'] ?? 0,
+-                        "SectionID" => $client['SectionID'] ?? 'Unknown'
+-                    ];
++        if (is_array($clients)) {
++            foreach ($clients as $client) {
++                if (isset($client['Account']['AccountID']) && $client['Account']['AccountID'] == $user['account_id']) {
++                    $response_data['is_online'] = true;
++                    $liveName = $client['Name'] ?? '';
++                    if ($liveName !== '') $response_data['LastPlayerName'] = $liveName;
++
++                    $matched = false;
++                    foreach ($response_data['Characters'] as &$ch) {
++                        $chName = $ch['Name'] ?? $ch['name'] ?? '';
++                        if ($liveName !== '' && $chName !== '' && strcasecmp($chName, $liveName) === 0) {
++                            $ch['is_active'] = true;
++                            if (isset($client['Level'])) $ch['Level'] = (int)$client['Level'];
++                            if (isset($client['CharClass'])) $ch['Class'] = $client['CharClass'];
++                            if (isset($client['SectionID'])) $ch['SectionID'] = $client['SectionID'];
++                            if (isset($client['EXP'])) $ch['EXP'] = (int)$client['EXP'];
++                            if (isset($client['Meseta'])) $ch['Meseta'] = (int)$client['Meseta'];
++                            $matched = true;
++                            break;
++                        }
++                    }
++                    unset($ch);
++
++                    if (!$matched && $liveName !== '') {
++                        $response_data['Characters'][] = [
++                            "Slot" => null,
++                            "Name" => $liveName,
++                            "Level" => $client['Level'] ?? 1,
++                            "Class" => $client['CharClass'] ?? 'Unknown',
++                            "SectionID" => $client['SectionID'] ?? 'Unknown',
++                            "EXP" => $client['EXP'] ?? 0,
++                            "Meseta" => $client['Meseta'] ?? 0,
++                            "PlayTimeSeconds" => $client['PlayTimeSeconds'] ?? 0,
++                            "is_active" => true
++                        ];
++                    }
++                    break;
+                 }
+             }
+         }
