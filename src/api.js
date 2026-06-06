@@ -42,7 +42,18 @@ async function apiCall(action, params = {}) {
         logInfo('API', `${action}${paramStr} → ok`);
         return resp.data;
     } catch (e) {
-        logError('API', `${action} → ${e.message}`);
+        // On HTTP errors axios exposes the server's response; capture its status and
+        // body so a 5xx is self-diagnosing (the server's actual error text) instead
+        // of just "Request failed with status code 500".
+        const status = e.response ? e.response.status : null;
+        let detail = e.message;
+        if (e.response && e.response.data) {
+            const body = typeof e.response.data === 'string'
+                ? e.response.data
+                : JSON.stringify(e.response.data);
+            detail = `${e.message} — ${body.substring(0, 300)}`;
+        }
+        logError('API', `${action}${status ? ` [${status}]` : ''} → ${detail}`);
         return { error: "Service unavailable" };
     }
 }
