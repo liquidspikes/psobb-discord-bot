@@ -46,6 +46,7 @@ The model can call these tools against the server API / website:
 - `!roles` — DMs a full **role audit**: classifies the bot's managed identity roles into ✅ ready / ❌ missing / ⬆️ above-the-bot, reports the bot's own Manage Roles permission and hierarchy position, and lists **every role on the server with the exact permissions it grants**.
 - `!channels` — DMs a full **channel permission audit**: every channel (grouped under its category) with its **permission overwrites** — the per-role / per-member allow ✅ and deny ⛔ rules layered on the `@everyone` defaults.
 - `!log [lines]` — DMs the most recent **backend actions** the bot has taken (role syncs, nickname changes, command invocations, PSOBB API calls, session lookups, tool executions, and errors — everything except the AI conversation itself). Defaults to the last 50; `!log 200` pulls the last 200 (see [Action log](#action-log)).
+- `!restart` — **restarts the bot.** It confirms in-channel, then exits cleanly; the service supervisor relaunches a fresh process within a few seconds. **Requires the process to be supervised with an auto-restart policy** (see [Running as a service](#running-as-a-service)).
 
 ### Role & nickname sync ⭐
 Mirrors a linked player's **currently-active (or most-recently-played) character** into Discord:
@@ -182,6 +183,7 @@ nicknames. Set `"enabled": false` to turn the whole role system off.
 | `src/model.js` | The configured Gemini model (persona + knowledge + tools). |
 | `src/roleSync.js` | Role & nickname sync system + admin audit commands (`!sync`, `!roles`, `!channels`). |
 | `src/actionLog.js` | Central action-log system (ring buffer + persistent file) and the `!log` command. |
+| `src/system.js` | Process-level admin commands (the `!restart` command). |
 | `src/messageHandler.js` | DM relay + main message/command/AI handler. |
 | `knowledge.md` | Core lore / server knowledge loaded into the system prompt. |
 | `rag/*.md` | Knowledge-base sources (classes, quests, drops, government tasks, etc.). |
@@ -215,6 +217,38 @@ node bot.js
 ```
 
 Dependencies (see [`package.json`](package.json)): `discord.js`, `@google/generative-ai`, `axios`.
+
+### Running as a service
+The `!restart` command works by **exiting the process cleanly** and relying on a supervisor to relaunch it — so the bot must run under a process manager with an auto-restart policy (without one, `!restart` would simply stop the bot for good).
+
+This deployment uses **systemd**. Example unit (`/etc/systemd/system/psobb-bot.service`):
+
+```ini
+[Unit]
+Description=PSOBB Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/psobb-discord-bot
+ExecStart=/usr/bin/node bot.js
+Restart=always
+RestartSec=3
+# Allow the manual !restart (and crash-loops) to recover without tripping the rate limiter:
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now psobb-bot
+journalctl -u psobb-bot -f    # follow logs
+```
+
+`Restart=always` is what makes `!restart` (which calls `process.exit(0)`) bring the bot back automatically. `StartLimitIntervalSec=0` prevents systemd from refusing to restart after several quick restarts.
 
 On startup you should see (action-log entries are tagged `[LEVEL] [CATEGORY]`):
 ```
