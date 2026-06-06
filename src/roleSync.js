@@ -32,12 +32,16 @@ const MANAGED_ROLE_GROUPS = {
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Detect whether a get_player response represents a linked account with characters.
+// Detect whether a get_player response represents a linked account that actually has
+// at least one real character. The all-slots API returns every one of the 20 slots,
+// padding empty ones with { slot, exists: false }, so a bare length check would treat
+// a character-less account as linked. Require a slot that isn't an empty placeholder
+// (legacy/online entries have no `exists` field, so `exists !== false` keeps them).
 function isLinked(playerInfo) {
     if (!playerInfo || playerInfo.error) return false;
     if (playerInfo.linked === false) return false;
     const chars = playerInfo.Characters || playerInfo.characters;
-    return Array.isArray(chars) && chars.length > 0;
+    return Array.isArray(chars) && chars.some((c) => c && c.exists !== false);
 }
 
 // Pick the relevant character. Preference order:
@@ -50,7 +54,9 @@ function isLinked(playerInfo) {
 //   5. the first character.
 function selectProfile(playerInfo, fallbackName = null) {
     if (!playerInfo) return null;
-    const chars = playerInfo.Characters || playerInfo.characters || [];
+    // Drop empty-slot placeholders (exists:false) so every later step — name match,
+    // active flag, highest-level fallback — only ever considers real characters.
+    const chars = (playerInfo.Characters || playerInfo.characters || []).filter((c) => c && c.exists !== false);
     if (chars.length === 0) return null;
 
     const charNameOf = (c) => c.name || c.Name || c.character_name || c.CharacterName;
@@ -351,7 +357,7 @@ async function handleSyncCommand(message) {
         // Diagnostic: record exactly what the server returned so offline-sync problems
         // are visible via !log. If chars=0 while the player is offline, the server-side
         // get_player_all_slots.patch is not returning save-file characters.
-        const charCount = (info && (info.Characters || info.characters) || []).length;
+        const charCount = ((info && (info.Characters || info.characters)) || []).filter((c) => c && c.exists !== false).length;
         logInfo('ROLE-SYNC', `!sync data for ${message.author.tag}: linked=${info && info.linked !== false && !info.error}, is_online=${!!(info && info.is_online)}, characters=${charCount}`);
         // The API layer turns any HTTP failure (e.g. a 500) into { error: ... }. Surface
         // that as a server problem rather than the misleading "you're not linked".
