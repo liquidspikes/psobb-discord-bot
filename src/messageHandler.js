@@ -11,7 +11,7 @@ const { loadSocialMemory } = require('./socialMemory');
 const { getCurrentPlayerSession } = require('./session');
 const { handleSyncCommand, handleRolesCommand, handleChannelsCommand } = require('./roleSync');
 const { handleLogCommand, logInfo, logWarn } = require('./actionLog');
-const { handleRestartCommand } = require('./system');
+const { handleRestartCommand, handlePullCommand } = require('./system');
 
 const handledMessages = new Set();
 
@@ -53,6 +53,9 @@ function registerMessageHandlers() {
             }
             if (message.content.startsWith('!restart')) {
                 return await handleRestartCommand(message);
+            }
+            if (message.content.startsWith('!pull') || message.content.startsWith('!gitpull') || message.content.startsWith('!update')) {
+                return await handlePullCommand(message);
             }
             if (message.content.startsWith('!roles')) {
                 return await handleRolesCommand(message);
