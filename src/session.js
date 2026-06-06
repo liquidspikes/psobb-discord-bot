@@ -2,6 +2,7 @@
 // episode, difficulty) from a get_player API response. Used to bias drop searches.
 const { apiCall } = require('./api');
 const { normalizeSectionId } = require('./pso');
+const { logError } = require('./actionLog');
 
 function extractActiveSession(playerInfo) {
     if (!playerInfo || !playerInfo.is_online) return null;
@@ -89,7 +90,7 @@ async function getCurrentPlayerSession(discordId) {
             return extractActiveSession(playerInfo);
         }
     } catch (e) {
-        console.error("[SESSION CHECK ERROR]", e.message);
+        logError('SESSION', `Session check failed for ${discordId}: ${e.message}`);
     }
     return null;
 }

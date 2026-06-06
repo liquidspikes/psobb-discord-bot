@@ -9,7 +9,8 @@ const { model } = require('./model');
 const { toolHandlers } = require('./tools');
 const { loadSocialMemory } = require('./socialMemory');
 const { getCurrentPlayerSession } = require('./session');
-const { handleSyncCommand } = require('./roleSync');
+const { handleSyncCommand, handleRolesCommand, handleChannelsCommand } = require('./roleSync');
+const { handleLogCommand, logInfo, logWarn } = require('./actionLog');
 
 const handledMessages = new Set();
 
@@ -43,12 +44,23 @@ function registerMessageHandlers() {
         if (!isDM && !isMentioned && !isCommand && !isConfigChannel) return;
         if (isCommand) {
             if (message.content.startsWith('!quest') || message.content.startsWith('$quest')) {
+                logInfo('COMMAND', `!quest (deprecated) by ${message.author.tag}`);
                 return await message.reply("📡 **Notice:** The manual `!quest` command has been deprecated. Mission Command now monitors your progress automatically! You will receive random bounties directly to your Guild Card while playing on the server.");
+            }
+            if (message.content.startsWith('!log')) {
+                return await handleLogCommand(message);
+            }
+            if (message.content.startsWith('!roles')) {
+                return await handleRolesCommand(message);
+            }
+            if (message.content.startsWith('!channels')) {
+                return await handleChannelsCommand(message);
             }
             if (message.content.startsWith('!sync')) {
                 return await handleSyncCommand(message);
             }
             if (!message.content.startsWith('!stats') && !message.content.startsWith('!quests') && !message.content.startsWith('!progress') && !message.content.startsWith('!progression')) return;
+            logInfo('COMMAND', `${message.content.split(/\s+/)[0]} by ${message.author.tag} (${message.author.id})`);
         }
 
         console.log("[MSG] From: " + message.author.tag + " | Content: " + message.content);
@@ -115,7 +127,7 @@ function registerMessageHandlers() {
             let session = null;
             const dropKeywords = /\b(drop|drops|rate|rates|find|loot|farm|monster|pouilly|slime|slimes|dropchart|chart|table|tables)\b|where\s+can\s+I\s+find|how\s+do\s+I\s+get/i;
             if (dropKeywords.test(message.content)) {
-                console.log(`[DROPS-DETECTED] User ${message.author.tag} asked about drops. Fetching online status...`);
+                logInfo('SESSION', `Drops query from ${message.author.tag} — checking online status.`);
                 session = await getCurrentPlayerSession(message.author.id);
             }
 
@@ -137,7 +149,7 @@ function registerMessageHandlers() {
             }
 
             if (session) {
-                console.log(`[ONLINE-SESSION] User ${message.author.tag} is online with character: ${session.charName}, ID: ${session.sectionId}, Episode: ${session.episode}, Difficulty: ${session.difficulty}`);
+                logInfo('SESSION', `${message.author.tag} online as ${session.charName} (ID: ${session.sectionId}, Ep: ${session.episode}, Diff: ${session.difficulty})`);
                 contextStr += `\n### CURRENT GAMEPLAY CONTEXT (ONLINE NOW) ###\n`;
                 contextStr += `The player is currently online and playing on the server!\n`;
                 contextStr += `- Active Character: "${session.charName}"${session.charLevel ? ` (Level ${session.charLevel} ${session.charClass || ''})` : ''}\n`;
@@ -158,9 +170,10 @@ function registerMessageHandlers() {
                 toolIteration++;
                 const toolResults = [];
                 for (const call of response.functionCalls()) {
-                    console.log(`[TOOL] Calling ${call.name} with ${JSON.stringify(call.args)}`);
+                    logInfo('TOOL', `${call.name}(${JSON.stringify(call.args)}) for ${message.author.tag}`);
                     const handler = toolHandlers[call.name];
                     const data = handler ? await handler(call.args) : { error: "Tool not found" };
+                    if (!handler) logWarn('TOOL', `Unknown tool requested: ${call.name}`);
                     toolResults.push({
                         functionResponse: {
                             name: call.name,

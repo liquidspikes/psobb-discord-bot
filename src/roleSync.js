@@ -7,15 +7,28 @@
 // =====================================================================
 const fs = require('fs');
 const path = require('path');
+const { ChannelType } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { apiCall } = require('./api');
+const { logInfo, logWarn, logError } = require('./actionLog');
 const {
     SUBCLASS_TO_MAIN,
+    SECTION_ID_NAMES,
+    LEVEL_ROLE_NAMES,
     MANAGED_ROLE_NAMES,
     normalizeSectionId,
     normalizeClass,
     levelRoleName,
 } = require('./pso');
+
+// Every identity role the bot is designed to manage, in display order and grouped,
+// so the audit can report exactly what exists / is missing / is mispositioned.
+const MANAGED_ROLE_GROUPS = {
+    'Main classes': [...new Set(Object.values(SUBCLASS_TO_MAIN))], // Hunter, Ranger, Force
+    Subclasses: Object.keys(SUBCLASS_TO_MAIN),
+    'Section IDs': [...SECTION_ID_NAMES],
+    'Level roles': [...LEVEL_ROLE_NAMES],
+};
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,7 +94,7 @@ function findGuildRole(guild, name) {
     const role = guild.roles.cache.find((r) => r.name.toLowerCase() === name.toLowerCase());
     if (!role && !warnedMissingRoles.has(name.toLowerCase())) {
         warnedMissingRoles.add(name.toLowerCase());
-        console.warn(`[ROLE-SYNC] Missing role "${name}" in "${guild.name}" — create it so the bot can assign it.`);
+        logWarn('ROLE-SYNC', `Missing role "${name}" in "${guild.name}" — create it so the bot can assign it.`);
     }
     return role;
 }
@@ -110,19 +123,38 @@ function isStrippableRole(role) {
 // Skip redundant Discord API calls when nothing changed since last sync.
 const lastSyncSignature = new Map();
 
+// Returns a detailed result so callers (especially the manual !sync command) can
+// report what actually happened instead of assuming success:
+//   { ok, skipped, applied[], missing[], rolesChanged, roleError, nickError, level }
 async function syncMember(member, playerInfo) {
-    if (!member || !isLinked(playerInfo)) return false;
+    const result = { ok: false, skipped: false, applied: [], missing: [], rolesChanged: false, roleError: null, nickError: null, level: 0 };
+    if (!member || !isLinked(playerInfo)) return result;
     const profile = selectProfile(playerInfo);
-    if (!profile) return false;
+    if (!profile) return result;
 
     const targets = computeTargetRoleNames(profile);
     const level = profile.charLevel || 0;
+    result.level = level;
     const sig = [targets.classRole, targets.subRole, targets.levelRole, targets.sectionRole, level].join('|');
-    if (lastSyncSignature.get(member.id) === sig) return false;
+    if (lastSyncSignature.get(member.id) === sig) {
+        result.skipped = true;
+        result.ok = true;
+        return result;
+    }
 
     const guild = member.guild;
+    // Ensure the role cache is populated before matching by name — a stale/empty
+    // cache would make every target role look "missing" and assign nothing.
+    if (guild.roles.cache.size <= 1) await guild.roles.fetch().catch(() => {});
+
     const targetRoleNames = [targets.classRole, targets.subRole, targets.levelRole, targets.sectionRole].filter(Boolean);
-    const targetRoles = targetRoleNames.map((n) => findGuildRole(guild, n)).filter(Boolean);
+    const targetRoles = [];
+    for (const name of targetRoleNames) {
+        const role = findGuildRole(guild, name);
+        if (role) targetRoles.push(role);
+        else result.missing.push(name);
+    }
+    result.applied = targetRoles.map((r) => r.name);
 
     // Final role set = the member's existing roles MINUS every strippable cosmetic
     // role (any zero-permission / managed identity role) PLUS the target roles.
@@ -136,13 +168,27 @@ async function syncMember(member, playerInfo) {
     });
     targetRoles.forEach((r) => finalRoleIds.add(r.id));
 
+    // Discord rejects the ENTIRE roles.set() call if any target role sits at or above
+    // the bot's highest role. Flag those up front so we can tell the admin exactly why.
+    const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+    const unmanageable = targetRoles.filter((r) => me && r.comparePositionTo(me.roles.highest) >= 0);
+    if (me && !me.permissions.has('ManageRoles')) {
+        result.roleError = 'I am missing the **Manage Roles** permission.';
+    } else if (unmanageable.length) {
+        result.roleError = `These roles are above my own role in the list, so Discord won't let me assign them: **${unmanageable.map((r) => r.name).join(', ')}**. Drag my bot role above them.`;
+    }
+
     const currentIds = new Set(member.roles.cache.map((r) => r.id));
     const rolesChanged = finalRoleIds.size !== currentIds.size || [...finalRoleIds].some((id) => !currentIds.has(id));
+    result.rolesChanged = rolesChanged;
 
-    try {
-        if (rolesChanged) await member.roles.set([...finalRoleIds], 'PSOBB role sync');
-    } catch (e) {
-        console.warn(`[ROLE-SYNC] Could not set roles for ${member.user.tag}: ${e.message}`);
+    if (rolesChanged && !result.roleError) {
+        try {
+            await member.roles.set([...finalRoleIds], 'PSOBB role sync');
+        } catch (e) {
+            result.roleError = e.message;
+            logWarn('ROLE-SYNC', `Could not set roles for ${member.user.tag}: ${e.message}`);
+        }
     }
 
     if ((config.role_sync || {}).nickname_level !== false && level > 0) {
@@ -151,13 +197,19 @@ async function syncMember(member, playerInfo) {
             const newNick = `${baseName} [${level}]`.substring(0, 32);
             if (member.nickname !== newNick) await member.setNickname(newNick, 'PSOBB level sync');
         } catch (e) {
-            console.warn(`[ROLE-SYNC] Could not set nickname for ${member.user.tag}: ${e.message}`);
+            result.nickError = e.message;
+            logWarn('ROLE-SYNC', `Could not set nickname for ${member.user.tag}: ${e.message}`);
         }
     }
 
-    lastSyncSignature.set(member.id, sig);
-    console.log(`[ROLE-SYNC] Synced ${member.user.tag}: [${targetRoleNames.join(', ') || 'no roles matched'}] Lvl ${level}`);
-    return true;
+    // Only cache the signature as "done" when roles actually applied cleanly, so a
+    // transient failure doesn't get skipped on the next tick / next !sync.
+    if (!result.roleError) lastSyncSignature.set(member.id, sig);
+    result.ok = !result.roleError;
+    const summary = `Synced ${member.user.tag}: [${result.applied.join(', ') || 'no roles matched'}] Lvl ${level}`;
+    if (result.roleError) logWarn('ROLE-SYNC', `${summary} — ERROR: ${result.roleError}`);
+    else logInfo('ROLE-SYNC', summary);
+    return result;
 }
 
 // Persisted roster of Discord IDs known to be linked (fallback for the online poll
@@ -169,7 +221,7 @@ function loadRoster() {
             const arr = JSON.parse(fs.readFileSync(ROSTER_PATH, 'utf8'));
             if (Array.isArray(arr)) return new Set(arr.map(String));
         }
-    } catch (e) { console.error('[ROLE-SYNC] Roster load error:', e.message); }
+    } catch (e) { logError('ROLE-SYNC', `Roster load error: ${e.message}`); }
     return new Set();
 }
 let linkedRoster = loadRoster();
@@ -179,7 +231,8 @@ function addToRoster(id) {
     linkedRoster.add(id);
     try {
         fs.writeFileSync(ROSTER_PATH, JSON.stringify([...linkedRoster], null, 2));
-    } catch (e) { console.error('[ROLE-SYNC] Roster save error:', e.message); }
+        logInfo('ROLE-SYNC', `Added ${id} to linked roster (now ${linkedRoster.size}).`);
+    } catch (e) { logError('ROLE-SYNC', `Roster save error: ${e.message}`); }
 }
 
 function getDiscordIdFromEntry(entry) {
@@ -189,6 +242,7 @@ function getDiscordIdFromEntry(entry) {
 async function runRoleSyncTick(guild) {
     try {
         const seen = new Set();
+        let syncedCount = 0;
 
         // Path A: if the online feed exposes Discord IDs, sync those directly.
         const online = await apiCall('get_online_players');
@@ -203,7 +257,10 @@ async function runRoleSyncTick(guild) {
             if (isLinked(info)) {
                 addToRoster(did);
                 const member = await guild.members.fetch(String(did)).catch(() => null);
-                if (member) await syncMember(member, info);
+                if (member) {
+                    const r = await syncMember(member, info);
+                    if (r.ok && !r.skipped) syncedCount++;
+                }
             }
             await delay(400);
         }
@@ -214,12 +271,16 @@ async function runRoleSyncTick(guild) {
             const info = await apiCall('get_player', { discord_id: id });
             if (isLinked(info) && info.is_online) {
                 const member = await guild.members.fetch(id).catch(() => null);
-                if (member) await syncMember(member, info);
+                if (member) {
+                    const r = await syncMember(member, info);
+                    if (r.ok && !r.skipped) syncedCount++;
+                }
             }
             await delay(400);
         }
+        if (syncedCount > 0) logInfo('ROLE-SYNC', `Tick complete — updated ${syncedCount} member(s).`);
     } catch (e) {
-        console.error('[ROLE-SYNC] Tick error:', e.message);
+        logError('ROLE-SYNC', `Tick error: ${e.message}`);
     }
 }
 
@@ -227,12 +288,12 @@ let roleSyncTimer = null;
 async function startRoleSync(guild) {
     const cfg = config.role_sync || {};
     if (cfg.enabled === false) {
-        console.log('[ROLE-SYNC] Disabled via config.');
+        logInfo('ROLE-SYNC', 'Disabled via config.');
         return;
     }
     const intervalMs = Math.max(1, cfg.interval_minutes || 5) * 60 * 1000;
     await guild.roles.fetch().catch(() => {});
-    console.log(`[ROLE-SYNC] Active in "${guild.name}". Interval: ${intervalMs / 60000} min. Roster: ${linkedRoster.size} linked. Protected roles: ${PROTECTED_ROLES.size}.`);
+    logInfo('ROLE-SYNC', `Active in "${guild.name}". Interval: ${intervalMs / 60000} min. Roster: ${linkedRoster.size} linked. Protected roles: ${PROTECTED_ROLES.size}.`);
     runRoleSyncTick(guild);
     roleSyncTimer = setInterval(() => runRoleSyncTick(guild), intervalMs);
 }
@@ -240,6 +301,7 @@ async function startRoleSync(guild) {
 // Manual on-demand sync via "!sync".
 async function handleSyncCommand(message) {
     try {
+        logInfo('COMMAND', `!sync by ${message.author.tag} (${message.author.id})`);
         if (!message.guild) {
             return await message.reply('⚠️ Run `!sync` in the server (not DMs) so I can update your roles.');
         }
@@ -254,21 +316,281 @@ async function handleSyncCommand(message) {
         }
         lastSyncSignature.delete(member.id); // force a fresh apply
         const profile = selectProfile(info);
-        const targets = computeTargetRoleNames(profile);
-        await syncMember(member, info);
-        const applied = [targets.classRole, targets.subRole, targets.levelRole, targets.sectionRole].filter(Boolean);
-        let reply = `✅ **Synced!** Character: **${profile.charName || 'Unknown'}** (Lvl ${profile.charLevel || '?'})\n`;
-        reply += applied.length ? `Roles: ${applied.join(', ')}` : 'No matching roles were found to assign — ask an admin to create them.';
+        const res = await syncMember(member, info);
+
+        const header = `Character: **${profile.charName || 'Unknown'}** (Lvl ${profile.charLevel || '?'})`;
+        let reply;
+        if (res.roleError) {
+            // Roles were resolved but Discord refused the change — surface the real cause.
+            reply = `⚠️ **Couldn't update your roles.** ${header}\n`;
+            reply += `Intended roles: ${res.applied.join(', ') || '(none matched)'}\n`;
+            reply += `Reason: ${res.roleError}`;
+        } else if (res.applied.length) {
+            reply = `✅ **Synced!** ${header}\nRoles: ${res.applied.join(', ')}`;
+            if (res.missing.length) reply += `\n⚠️ Not found on this server (ask an admin to create them): ${res.missing.join(', ')}`;
+        } else {
+            reply = `ℹ️ **Linked, but no matching roles were found to assign.** ${header}\n`;
+            reply += res.missing.length
+                ? `Ask an admin to create these roles: ${res.missing.join(', ')}`
+                : 'There were no roles to apply for this character.';
+        }
+        if (res.nickError) reply += `\n⚠️ Couldn't update your nickname: ${res.nickError}`;
         return await message.reply(reply);
     } catch (e) {
-        console.error('[ROLE-SYNC] !sync error:', e.message);
+        logError('ROLE-SYNC', `!sync error for ${message.author.tag}: ${e.message}`);
         return await message.reply('📡 Sync failed due to interference. Try again shortly.');
+    }
+}
+
+// =====================================================================
+// SERVER ROLE AUDIT
+// Reads EVERY role on the server and classifies the bot's managed identity
+// roles into present / missing / above-the-bot, plus reports the bot's own
+// permission + hierarchy position. This is the single source of truth for
+// "why can't the bot assign roles?".
+// =====================================================================
+async function auditGuildRoles(guild) {
+    // Pull the complete, fresh role list straight from Discord (not the cache).
+    await guild.roles.fetch().catch(() => {});
+    const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+    const botHighest = me ? me.roles.highest : null;
+    const hasManagePerm = !!(me && me.permissions.has('ManageRoles'));
+
+    // Index every server role by lowercased name for case-insensitive matching.
+    const byName = new Map();
+    guild.roles.cache.forEach((r) => byName.set(r.name.toLowerCase(), r));
+
+    const groups = {};       // group label -> [{ name, status }]
+    const present = [];      // exists and the bot can assign it
+    const missing = [];      // not created on the server
+    const unmanageable = []; // exists but sits at/above the bot's top role
+
+    for (const [label, names] of Object.entries(MANAGED_ROLE_GROUPS)) {
+        groups[label] = [];
+        for (const name of names) {
+            const role = byName.get(name.toLowerCase());
+            let status;
+            if (!role) {
+                status = 'missing';
+                missing.push(name);
+            } else if (botHighest && role.comparePositionTo(botHighest) >= 0) {
+                status = 'above';
+                unmanageable.push(role.name);
+            } else {
+                status = 'ok';
+                present.push(role.name);
+            }
+            groups[label].push({ name, status });
+        }
+    }
+
+    // Every role on the server (highest first) with the exact permissions it grants,
+    // so an admin can review the full permission layout — not just the managed roles.
+    const allRoles = [...guild.roles.cache.values()]
+        .sort((a, b) => b.position - a.position)
+        .map((r) => ({
+            name: r.name,
+            position: r.position,
+            managed: r.managed,
+            isEveryone: r.id === guild.id,
+            permissions: r.permissions.has('Administrator') ? ['Administrator (grants ALL)'] : r.permissions.toArray(),
+        }));
+
+    return {
+        totalServerRoles: guild.roles.cache.size,
+        botRoleName: botHighest ? botHighest.name : null,
+        botRolePosition: botHighest ? botHighest.position : null,
+        hasManagePerm,
+        groups,
+        present,
+        missing,
+        unmanageable,
+        allRoles,
+    };
+}
+
+// Format the audit as a Discord-friendly message.
+function formatRoleAudit(audit) {
+    const icon = { ok: '✅', missing: '❌', above: '⬆️' };
+    let out = `**PSOBB Role Audit** — ${audit.totalServerRoles} roles on this server\n`;
+    out += audit.hasManagePerm
+        ? `🔑 I have **Manage Roles**.`
+        : `🚫 I am **missing the Manage Roles permission** — I can't change anyone's roles until that's granted.`;
+    if (audit.botRoleName) out += ` My top role is **${audit.botRoleName}** (position ${audit.botRolePosition}).`;
+    out += '\n';
+
+    for (const [label, entries] of Object.entries(audit.groups)) {
+        const line = entries.map((e) => `${icon[e.status]} ${e.name}`).join('  ');
+        out += `\n__${label}__\n${line}\n`;
+    }
+
+    out += `\n**Summary:** ${audit.present.length} ready · ${audit.missing.length} missing · ${audit.unmanageable.length} above my role`;
+    if (audit.missing.length) out += `\n❌ **Create these roles:** ${audit.missing.join(', ')}`;
+    if (audit.unmanageable.length) out += `\n⬆️ **Drag my bot role above these:** ${audit.unmanageable.join(', ')}`;
+    if (!audit.missing.length && !audit.unmanageable.length && audit.hasManagePerm) {
+        out += `\n🎉 Everything is set up correctly — I can assign all managed roles.`;
+    }
+
+    // Full permission breakdown for every role on the server (highest → lowest).
+    out += `\n\n__All roles & their permissions__ (highest → lowest)`;
+    for (const r of audit.allRoles) {
+        const label = r.isEveryone ? '@everyone' : r.name + (r.managed ? ' (integration)' : '');
+        const perms = r.permissions.length ? r.permissions.join(', ') : 'none';
+        out += `\n• **${label}** [pos ${r.position}] — ${perms}`;
+    }
+    return out;
+}
+
+// Shared: DM a long report to the requesting admin, split on line boundaries so it
+// stays under Discord's 2000-char limit and never breaks a line mid-word. Returns
+// true on success; on failure it notifies the user in-channel and returns false.
+async function dmAdminReport(message, fullText, commandName) {
+    const chunks = [];
+    let cur = '';
+    for (const line of fullText.split('\n')) {
+        if (line.length > 1900) {
+            if (cur) { chunks.push(cur); cur = ''; }
+            for (let i = 0; i < line.length; i += 1900) chunks.push(line.substring(i, i + 1900));
+            continue;
+        }
+        if (cur.length + line.length + 1 > 1900) { chunks.push(cur); cur = ''; }
+        cur += (cur ? '\n' : '') + line;
+    }
+    if (cur) chunks.push(cur);
+
+    try {
+        for (const c of chunks) await message.author.send(c);
+        return true;
+    } catch (dmErr) {
+        logWarn('AUDIT', `${commandName} DM failed for ${message.author.tag}: ${dmErr.message}`);
+        await message.reply(`📬 I couldn't DM you — please enable direct messages from server members and try \`${commandName}\` again.`);
+        return false;
+    }
+}
+
+// Admin command: "!roles" — DM the full server role audit to the requesting admin.
+async function handleRolesCommand(message) {
+    try {
+        logInfo('COMMAND', `!roles by ${message.author.tag} (${message.author.id})`);
+        if (!message.guild) {
+            return await message.reply('⚠️ Run `!roles` in the server (not DMs).');
+        }
+        // Restrict to server administrators, since the audit exposes server config.
+        if (!message.member || !message.member.permissions.has('Administrator')) {
+            return await message.reply('🔒 `!roles` is for server admins only.');
+        }
+        const audit = await auditGuildRoles(message.guild);
+        const report = `**${message.guild.name}**\n${formatRoleAudit(audit)}`;
+        if (await dmAdminReport(message, report, '!roles')) {
+            return await message.reply('📬 Sent you the role audit in a DM.');
+        }
+    } catch (e) {
+        logError('ROLE-SYNC', `!roles error: ${e.message}`);
+        return await message.reply('📡 Could not read the server roles. Try again shortly.');
+    }
+}
+
+// =====================================================================
+// SERVER CHANNEL PERMISSION AUDIT
+// Reads every channel and reports its permission overwrites (the per-role /
+// per-member allow & deny rules layered on top of the @everyone defaults).
+// =====================================================================
+function channelTypeLabel(type) {
+    switch (type) {
+        case ChannelType.GuildText: return 'text';
+        case ChannelType.GuildVoice: return 'voice';
+        case ChannelType.GuildCategory: return 'category';
+        case ChannelType.GuildAnnouncement: return 'announcement';
+        case ChannelType.GuildStageVoice: return 'stage';
+        case ChannelType.GuildForum: return 'forum';
+        case ChannelType.GuildMedia: return 'media';
+        default: return `type${type}`;
+    }
+}
+
+async function auditGuildChannels(guild) {
+    await guild.channels.fetch().catch(() => {});
+    const channels = [...guild.channels.cache.values()].sort((a, b) => a.rawPosition - b.rawPosition);
+
+    const result = [];
+    for (const ch of channels) {
+        const overwrites = [];
+        const owCache = ch.permissionOverwrites && ch.permissionOverwrites.cache;
+        if (owCache) {
+            for (const ow of owCache.values()) {
+                let target;
+                if (ow.type === 0) { // role overwrite
+                    const role = guild.roles.cache.get(ow.id);
+                    target = role ? (ow.id === guild.id ? '@everyone' : `@${role.name}`) : `role:${ow.id}`;
+                } else { // member overwrite
+                    const mem = guild.members.cache.get(ow.id) || await guild.members.fetch(ow.id).catch(() => null);
+                    target = mem ? `@${mem.user.tag}` : `member:${ow.id}`;
+                }
+                overwrites.push({ target, allow: ow.allow.toArray(), deny: ow.deny.toArray() });
+            }
+        }
+        result.push({
+            name: ch.name,
+            type: channelTypeLabel(ch.type),
+            isCategory: ch.type === ChannelType.GuildCategory,
+            parent: ch.parent ? ch.parent.name : null,
+            overwrites,
+        });
+    }
+    return { guildName: guild.name, totalChannels: channels.length, channels: result };
+}
+
+function formatChannelAudit(audit) {
+    let out = `**PSOBB Channel Permission Audit** — ${audit.totalChannels} channels on this server\n`;
+    out += `Each channel's permission overwrites are layered on top of @everyone + category defaults. "(no overwrites)" means it inherits its defaults.`;
+    for (const ch of audit.channels) {
+        if (ch.isCategory) {
+            out += `\n\n📁 **${ch.name}** (category)`;
+        } else {
+            out += `\n\n#${ch.name} [${ch.type}]${ch.parent ? ` — in ${ch.parent}` : ''}`;
+        }
+        if (!ch.overwrites.length) {
+            out += `\n   (no overwrites — inherits defaults)`;
+            continue;
+        }
+        for (const ow of ch.overwrites) {
+            out += `\n   ${ow.target}:`;
+            if (ow.allow.length) out += `\n      ✅ allow: ${ow.allow.join(', ')}`;
+            if (ow.deny.length) out += `\n      ⛔ deny: ${ow.deny.join(', ')}`;
+            if (!ow.allow.length && !ow.deny.length) out += `\n      (neutral — no explicit allow/deny)`;
+        }
+    }
+    return out;
+}
+
+// Admin command: "!channels" — DM the full channel permission audit to the admin.
+async function handleChannelsCommand(message) {
+    try {
+        logInfo('COMMAND', `!channels by ${message.author.tag} (${message.author.id})`);
+        if (!message.guild) {
+            return await message.reply('⚠️ Run `!channels` in the server (not DMs).');
+        }
+        if (!message.member || !message.member.permissions.has('Administrator')) {
+            return await message.reply('🔒 `!channels` is for server admins only.');
+        }
+        const audit = await auditGuildChannels(message.guild);
+        const report = `**${message.guild.name}**\n${formatChannelAudit(audit)}`;
+        if (await dmAdminReport(message, report, '!channels')) {
+            return await message.reply('📬 Sent you the channel permission audit in a DM.');
+        }
+    } catch (e) {
+        logError('ROLE-SYNC', `!channels error: ${e.message}`);
+        return await message.reply('📡 Could not read the server channels. Try again shortly.');
     }
 }
 
 module.exports = {
     startRoleSync,
     handleSyncCommand,
+    handleRolesCommand,
+    handleChannelsCommand,
+    auditGuildRoles,
+    auditGuildChannels,
     syncMember,
     selectProfile,
     computeTargetRoleNames,
