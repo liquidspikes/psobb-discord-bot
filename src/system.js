@@ -2,8 +2,9 @@
 // Restart relies on the process being supervised with an auto-restart policy
 // (this deployment uses a systemd unit with `Restart=always`): the bot simply
 // exits cleanly and systemd relaunches a fresh process.
+const { exec } = require('child_process');
 const { client } = require('./discordClient');
-const { logInfo, logWarn } = require('./actionLog');
+const { logInfo, logWarn, logError } = require('./actionLog');
 
 // Admin command: "!restart" — gracefully exit so the supervisor relaunches the bot.
 async function handleRestartCommand(message) {
@@ -62,4 +63,51 @@ async function announceStartup(guild) {
     }
 }
 
-module.exports = { handleRestartCommand, announceStartup };
+// Admin command: "!pull" — pull the latest changes from Git and restart if there are updates.
+async function handlePullCommand(message) {
+    try {
+        logInfo('COMMAND', `!pull by ${message.author.tag} (${message.author.id})`);
+        if (!message.guild) {
+            return await message.reply('⚠️ Run `!pull` in the server (not DMs).');
+        }
+        if (!message.member || !message.member.permissions.has('Administrator')) {
+            return await message.reply('🔒 `!pull` is for server admins only.');
+        }
+
+        const reply = await message.reply('📡 **Initiating git pull from origin main...**');
+        
+        const cmd = 'git -c core.sshCommand="ssh -i /psobb-bot/.git/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" pull origin main';
+        
+        exec(cmd, { cwd: '/psobb-bot' }, async (error, stdout, stderr) => {
+            if (error) {
+                logError('SYSTEM', `Git pull error: ${error.message}`);
+                try {
+                    return await reply.edit(`❌ **Git pull failed:**\n\`\`\`\n${stderr || error.message}\n\`\`\``);
+                } catch (e) {}
+                return;
+            }
+            
+            logInfo('SYSTEM', `Git pull output: ${stdout}`);
+            
+            if (stdout.includes('Already up to date.')) {
+                try {
+                    return await reply.edit('✅ **Codebase is already up to date.** No restart required.');
+                } catch (e) {}
+                return;
+            }
+            
+            try {
+                await reply.edit(`✅ **Git pull succeeded!**\n\`\`\`\n${stdout.trim()}\n\`\`\`\n♻️ **Restarting now to apply updates...**`);
+            } catch (e) {}
+            
+            setTimeout(async () => {
+                try { await client.destroy(); } catch (e) {}
+                process.exit(0);
+            }, 2000);
+        });
+    } catch (e) {
+        logWarn('SYSTEM', `!pull error for ${message.author.tag}: ${e.message}`);
+    }
+}
+
+module.exports = { handleRestartCommand, announceStartup, handlePullCommand };
