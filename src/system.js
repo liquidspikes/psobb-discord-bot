@@ -36,4 +36,30 @@ async function handleRestartCommand(message) {
     }
 }
 
-module.exports = { handleRestartCommand };
+// Called once on boot/reboot: DM every server admin (members with the Administrator
+// permission, excluding bots) that the bot has started, with a timestamp. Fires once
+// per process, so a `!restart` or crash-relaunch produces exactly one notice.
+async function announceStartup(guild) {
+    const startedAt = new Date();
+    try {
+        await guild.members.fetch(); // populate the member cache so we can find admins
+        const admins = guild.members.cache.filter(
+            (m) => !m.user.bot && m.permissions.has('Administrator')
+        );
+        const stamp = `${startedAt.toISOString()} (${startedAt.toLocaleString()})`;
+        let delivered = 0;
+        for (const member of admins.values()) {
+            try {
+                await member.send(`✅ **${guild.name}** — bot started at ${stamp}.`);
+                delivered++;
+            } catch (e) {
+                // Admin has DMs from server members disabled; skip them.
+            }
+        }
+        logInfo('SYSTEM', `Startup notice DMed to ${delivered}/${admins.size} admin(s).`);
+    } catch (e) {
+        logWarn('SYSTEM', `Startup admin notice failed: ${e.message}`);
+    }
+}
+
+module.exports = { handleRestartCommand, announceStartup };

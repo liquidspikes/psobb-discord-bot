@@ -40,22 +40,31 @@ function isLinked(playerInfo) {
     return Array.isArray(chars) && chars.length > 0;
 }
 
-// Pick the relevant character: currently active (by LastPlayerName / active flag),
-// else most recently played, falling back to the highest-level character.
-function selectProfile(playerInfo) {
+// Pick the relevant character. Preference order:
+//   1. the live "last played" character (LastPlayerName) — only present while online,
+//   2. a character flagged active,
+//   3. `fallbackName` — the last active character the bot saw for this player while
+//      they were online (Option A cache), used to keep offline syncs on their real
+//      last-used character instead of guessing,
+//   4. the highest-level character,
+//   5. the first character.
+function selectProfile(playerInfo, fallbackName = null) {
     if (!playerInfo) return null;
     const chars = playerInfo.Characters || playerInfo.characters || [];
     if (chars.length === 0) return null;
 
+    const charNameOf = (c) => c.name || c.Name || c.character_name || c.CharacterName;
+    const findByName = (name) => name
+        ? chars.find((c) => {
+            const cName = charNameOf(c);
+            return cName && cName.toLowerCase() === String(name).toLowerCase();
+        })
+        : null;
+
     const lastPlayerName = playerInfo.LastPlayerName || playerInfo.last_player_name;
-    let chosen = null;
-    if (lastPlayerName) {
-        chosen = chars.find((c) => {
-            const cName = c.name || c.Name || c.character_name || c.CharacterName;
-            return cName && cName.toLowerCase() === lastPlayerName.toLowerCase();
-        });
-    }
+    let chosen = findByName(lastPlayerName);
     if (!chosen) chosen = chars.find((c) => c.is_active || c.isActive || c.active || c.Active);
+    if (!chosen) chosen = findByName(fallbackName);
     if (!chosen) {
         chosen = chars.reduce((best, c) => {
             const lvl = parseInt(c.level || c.Level || 0) || 0;
@@ -129,8 +138,12 @@ const lastSyncSignature = new Map();
 async function syncMember(member, playerInfo) {
     const result = { ok: false, skipped: false, applied: [], missing: [], rolesChanged: false, roleError: null, nickError: null, level: 0 };
     if (!member || !isLinked(playerInfo)) return result;
-    const profile = selectProfile(playerInfo);
+    const profile = selectProfile(playerInfo, getLastChar(member.id));
     if (!profile) return result;
+
+    // While the player is online we definitively know their active character — remember
+    // it so a later OFFLINE sync stays pinned to that same character (Option A cache).
+    if (playerInfo.is_online && profile.charName) setLastChar(member.id, profile.charName);
 
     const targets = computeTargetRoleNames(profile);
     const level = profile.charLevel || 0;
@@ -235,6 +248,32 @@ function addToRoster(id) {
     } catch (e) { logError('ROLE-SYNC', `Roster save error: ${e.message}`); }
 }
 
+// Option A cache: the last active character name the bot observed for each Discord ID
+// while that player was ONLINE. Used to keep offline syncs pinned to the player's real
+// last-used character instead of falling back to their highest-level one.
+const LAST_CHAR_PATH = path.join(MEMORY_DIR, 'last_character.json');
+function loadLastChars() {
+    try {
+        if (fs.existsSync(LAST_CHAR_PATH)) {
+            const obj = JSON.parse(fs.readFileSync(LAST_CHAR_PATH, 'utf8'));
+            if (obj && typeof obj === 'object') return new Map(Object.entries(obj));
+        }
+    } catch (e) { logError('ROLE-SYNC', `Last-character load error: ${e.message}`); }
+    return new Map();
+}
+let lastChars = loadLastChars();
+function getLastChar(id) {
+    return lastChars.get(String(id)) || null;
+}
+function setLastChar(id, name) {
+    id = String(id);
+    if (!name || lastChars.get(id) === name) return; // no change → no disk write
+    lastChars.set(id, name);
+    try {
+        fs.writeFileSync(LAST_CHAR_PATH, JSON.stringify(Object.fromEntries(lastChars), null, 2));
+    } catch (e) { logError('ROLE-SYNC', `Last-character save error: ${e.message}`); }
+}
+
 function getDiscordIdFromEntry(entry) {
     return entry && (entry.discord_id || entry.DiscordID || entry.discord || entry.discordId) || null;
 }
@@ -265,11 +304,14 @@ async function runRoleSyncTick(guild) {
             await delay(400);
         }
 
-        // Path B: poll the persisted roster and sync anyone currently online.
+        // Path B: poll the persisted roster and sync every linked member, online or
+        // not. Offline character data comes from the server's save-file source (see
+        // get_player_all_slots.patch); the per-member signature cache below means an
+        // unchanged member costs no Discord API calls, so this won't churn roles.
         for (const id of linkedRoster) {
             if (seen.has(id)) continue;
             const info = await apiCall('get_player', { discord_id: id });
-            if (isLinked(info) && info.is_online) {
+            if (isLinked(info)) {
                 const member = await guild.members.fetch(id).catch(() => null);
                 if (member) {
                     const r = await syncMember(member, info);
@@ -315,7 +357,9 @@ async function handleSyncCommand(message) {
             return await message.reply('⚠️ I couldn\'t fetch your server membership to update roles.');
         }
         lastSyncSignature.delete(member.id); // force a fresh apply
-        const profile = selectProfile(info);
+        // Build the reply header from the same character syncMember will act on,
+        // including the offline last-used-character fallback (Option A cache).
+        const profile = selectProfile(info, getLastChar(member.id));
         const res = await syncMember(member, info);
 
         const header = `Character: **${profile.charName || 'Unknown'}** (Lvl ${profile.charLevel || '?'})`;

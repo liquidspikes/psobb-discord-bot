@@ -48,6 +48,8 @@ The model can call these tools against the server API / website:
 - `!log [lines]` — DMs the most recent **backend actions** the bot has taken (role syncs, nickname changes, command invocations, PSOBB API calls, session lookups, tool executions, and errors — everything except the AI conversation itself). Defaults to the last 50; `!log 200` pulls the last 200 (see [Action log](#action-log)).
 - `!restart` — **restarts the bot.** It confirms in-channel, then exits cleanly; the service supervisor relaunches a fresh process within a few seconds. **Requires the process to be supervised with an auto-restart policy** (see [Running as a service](#running-as-a-service)).
 
+On every boot/reboot the bot **DMs each server admin** (members with the Administrator permission) a `✅ bot started at <timestamp>` notice — so you get confirmation after a `!restart`, a crash-relaunch, or a deploy. Admins with DMs disabled are skipped; the delivery count is recorded in the action log.
+
 ### Role & nickname sync ⭐
 Mirrors a linked player's **currently-active (or most-recently-played) character** into Discord:
 
@@ -59,8 +61,12 @@ Mirrors a linked player's **currently-active (or most-recently-played) character
 - **Display color** — comes from the **Section ID** role (Discord uses the highest *colored* role).
 
 How it runs:
-- **Automatic poll** on an interval (default 5 min). If the online feed exposes a Discord ID it syncs those players directly; otherwise it falls back to polling a persisted roster of known-linked members and syncs whoever is online.
+- **Automatic poll** on an interval (default 5 min). It first syncs any Discord IDs exposed by the online feed, then walks the persisted roster of known-linked members and syncs **every** linked member — online or offline — relying on the per-member signature cache so unchanged members cost no Discord API calls.
 - **`!sync`** for an instant, on-demand refresh.
+
+> **Offline data requires the server-side `get_player_all_slots.patch`** (see [Developer & ops scripts](#developer--ops-scripts)). Without it, the psobb.io API only returns character data for players who are currently online, so offline `!sync`/poll attempts find no characters and are reported as "not linked".
+
+**Which character is synced when offline?** While a player is online the bot caches their active character name (in `last_character.json`). When that player later syncs **offline** — where the API exposes no "last played" marker — the bot uses that cached name to stay on their **last-used character**. If the bot has never seen the player online (cold start), it falls back to their **highest-level** character.
 
 Design guarantees:
 - **Assign-existing-only** — the bot never creates or recolors roles. An admin creates them once; the bot only adds/removes by name (case-insensitive).
@@ -190,6 +196,7 @@ nicknames. Set `"enabled": false` to turn the whole role system off.
 | `/psobb-bot/discord_config.json` | Runtime configuration (not in the repo). |
 | `/psobb-bot/memory/<discordId>.json` | Per-user social memory. |
 | `/psobb-bot/memory/linked_roster.json` | Persisted set of Discord IDs known to be linked (role-sync fallback). |
+| `/psobb-bot/memory/last_character.json` | Last active character name seen per Discord ID while online — pins **offline** syncs to the player's last-used character. |
 | `/psobb-bot/memory/questions.log` | Append-only log of incoming questions. |
 | `/psobb-bot/memory/actions.log` | Persistent backend action log surfaced by `!log` (auto-trimmed to ~8–10k lines). |
 
