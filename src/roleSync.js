@@ -353,6 +353,12 @@ async function handleSyncCommand(message) {
         // get_player_all_slots.patch is not returning save-file characters.
         const charCount = (info && (info.Characters || info.characters) || []).length;
         logInfo('ROLE-SYNC', `!sync data for ${message.author.tag}: linked=${info && info.linked !== false && !info.error}, is_online=${!!(info && info.is_online)}, characters=${charCount}`);
+        // The API layer turns any HTTP failure (e.g. a 500) into { error: ... }. Surface
+        // that as a server problem rather than the misleading "you're not linked".
+        if (info && info.error) {
+            logWarn('ROLE-SYNC', `!sync: get_player API error for ${message.author.tag}: ${info.error}`);
+            return await message.reply('🛰️ The server hit an error fetching your character data. This is a **server-side** problem (often it fails for offline accounts). Please let an admin know — or try again while logged in.');
+        }
         if (!isLinked(info)) {
             if (info && !info.error && info.linked !== false && charCount === 0) {
                 // Linked account, but the API returned no characters — almost always the
