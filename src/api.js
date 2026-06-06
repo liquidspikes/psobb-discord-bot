@@ -1,6 +1,7 @@
 // PSOBB server API + drops-data access (with a 30-minute drops cache).
 const axios = require('axios');
 const { config } = require('./config');
+const { logInfo, logWarn, logError } = require('./actionLog');
 
 // Drops Cache Variables & Helper
 let cachedDrops = null;
@@ -12,7 +13,7 @@ async function getDropsData() {
     if (cachedDrops && (now - lastDropsFetch < CACHE_DURATION)) {
         return cachedDrops;
     }
-    console.log("[DROPS] Fetching fresh drop data from server...");
+    logInfo('DROPS', 'Fetching fresh drop data from server...');
     const url = "https://psobb.io/api/get_drops.php";
     const resp = await axios.get(url, { timeout: 15000 });
     if (resp.data && resp.data.success && resp.data.data) {
@@ -21,7 +22,7 @@ async function getDropsData() {
         return cachedDrops;
     }
     if (cachedDrops) {
-        console.warn("[DROPS] Fetch failed, using expired cache");
+        logWarn('DROPS', 'Fetch failed, using expired cache');
         return cachedDrops;
     }
     throw new Error("Failed to load drop data from server");
@@ -37,9 +38,11 @@ async function apiCall(action, params = {}) {
             headers: { 'Authorization': "Bearer " + config.psobb_api_secret },
             timeout: 5000
         });
+        const paramStr = Object.keys(params).length ? ` (${Object.keys(params).join(', ')})` : '';
+        logInfo('API', `${action}${paramStr} → ok`);
         return resp.data;
     } catch (e) {
-        console.error(`[API ERROR] ${action}: ${e.message}`);
+        logError('API', `${action} → ${e.message}`);
         return { error: "Service unavailable" };
     }
 }

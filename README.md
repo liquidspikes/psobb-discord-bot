@@ -36,9 +36,16 @@ The model can call these tools against the server API / website:
 | `update_social_memory` / `get_social_memory` | Read/write the bot's long-term notes about a user. |
 
 ### Commands
+
+**Player commands**
 - `!stats`, `!quests`, `!progress`, `!progression` — routed to the AI (which calls `get_player_info` and reports character stats / quest & area-unlock progress).
-- `!sync` — **manually refresh your roles and nickname** from your linked PSOBB account (see below).
+- `!sync` — **manually refresh your roles and nickname** from your linked PSOBB account (see below). Reports the real outcome, including any missing roles or hierarchy/permission problems that blocked the change.
 - `!quest` / `$quest` — deprecated; returns a notice that bounties are now automatic.
+
+**Admin commands** (require the **Administrator** permission; the report is sent to the requester via **DM**)
+- `!roles` — DMs a full **role audit**: classifies the bot's managed identity roles into ✅ ready / ❌ missing / ⬆️ above-the-bot, reports the bot's own Manage Roles permission and hierarchy position, and lists **every role on the server with the exact permissions it grants**.
+- `!channels` — DMs a full **channel permission audit**: every channel (grouped under its category) with its **permission overwrites** — the per-role / per-member allow ✅ and deny ⛔ rules layered on the `@everyone` defaults.
+- `!log [lines]` — DMs the most recent **backend actions** the bot has taken (role syncs, nickname changes, command invocations, PSOBB API calls, session lookups, tool executions, and errors — everything except the AI conversation itself). Defaults to the last 50; `!log 200` pulls the last 200 (see [Action log](#action-log)).
 
 ### Role & nickname sync ⭐
 Mirrors a linked player's **currently-active (or most-recently-played) character** into Discord:
@@ -59,6 +66,29 @@ Design guarantees:
 - **Permission-driven cleanup** — on every sync (character swap or `!sync`) it strips **all** of the member's permission-less cosmetic roles (any role with *Permissions: none*, plus the known managed identity names) and reapplies the correct ones. Roles that grant any permission, integration/booster roles, roles above the bot in the hierarchy, and any role in `role_sync.protected_roles` are never touched.
 - **No-op skipping** — a per-member signature cache avoids redundant Discord API calls when nothing changed.
 - **Fails safe** — role/nickname errors (e.g. hierarchy or owner-rename limits) are logged and skipped; the bot keeps running.
+
+### Action log
+A central log of every backend action the bot takes — **excluding the AI chatbot conversation** (user message bodies and the model's generated replies are not recorded here). Implemented in [`src/actionLog.js`](src/actionLog.js).
+
+What's captured, by category:
+
+| Category | Examples |
+| --- | --- |
+| `SYSTEM` | Bot startup / ready. |
+| `COMMAND` | `!sync`, `!roles`, `!channels`, `!log`, `!quest` (deprecated), `!stats`/`!quests`/`!progress` — with who ran them. |
+| `ROLE-SYNC` | Per-member sync results, missing/unmanageable roles, nickname changes, roster additions, tick summaries, errors. |
+| `API` | Every PSOBB API call (success + failure). |
+| `DROPS` | Drop-table fetches / cache fallbacks. |
+| `SESSION` | Online-session lookups for drop queries. |
+| `TOOL` | Every AI tool execution and its arguments (e.g. `search_drops`, `update_social_memory`). |
+
+Each entry is written to three places: the **console**, an in-memory **ring buffer** (the live "batch window", last 2000 actions), and a persistent file at `/psobb-bot/memory/actions.log` (auto-trimmed — capped at 10000 lines, trimmed back to 8000). Entry format:
+
+```
+[2026-06-06T18:03:11.244Z] [INFO] [ROLE-SYNC] Synced Hunter Joe#1234: [Hunter, HUmar, LVL140, Skyly] Lvl 142
+```
+
+Admins retrieve recent actions over DM with **`!log [lines]`** — default 50, capped at 10000, read from the persistent file so history survives restarts.
 
 ---
 
@@ -150,7 +180,8 @@ nicknames. Set `"enabled": false` to turn the whole role system off.
 | `src/session.js` | Detects a player's current in-game session. |
 | `src/tools.js` | Gemini tool declarations + handlers. |
 | `src/model.js` | The configured Gemini model (persona + knowledge + tools). |
-| `src/roleSync.js` | Role & nickname sync system. |
+| `src/roleSync.js` | Role & nickname sync system + admin audit commands (`!sync`, `!roles`, `!channels`). |
+| `src/actionLog.js` | Central action-log system (ring buffer + persistent file) and the `!log` command. |
 | `src/messageHandler.js` | DM relay + main message/command/AI handler. |
 | `knowledge.md` | Core lore / server knowledge loaded into the system prompt. |
 | `rag/*.md` | Knowledge-base sources (classes, quests, drops, government tasks, etc.). |
@@ -158,6 +189,7 @@ nicknames. Set `"enabled": false` to turn the whole role system off.
 | `/psobb-bot/memory/<discordId>.json` | Per-user social memory. |
 | `/psobb-bot/memory/linked_roster.json` | Persisted set of Discord IDs known to be linked (role-sync fallback). |
 | `/psobb-bot/memory/questions.log` | Append-only log of incoming questions. |
+| `/psobb-bot/memory/actions.log` | Persistent backend action log surfaced by `!log` (auto-trimmed to ~8–10k lines). |
 
 ---
 
@@ -184,15 +216,15 @@ node bot.js
 
 Dependencies (see [`package.json`](package.json)): `discord.js`, `@google/generative-ai`, `axios`.
 
-On startup you should see:
+On startup you should see (action-log entries are tagged `[LEVEL] [CATEGORY]`):
 ```
 [INIT] Loaded RAG content from N files.
-[READY] Bot is live: <bot tag>
-[ROLE-SYNC] Active in "<guild>". Interval: 5 min. Roster: N linked. Protected roles: N.
+[<timestamp>] [INFO] [SYSTEM] Bot is live: <bot tag>
+[<timestamp>] [INFO] [ROLE-SYNC] Active in "<guild>". Interval: 5 min. Roster: N linked. Protected roles: N.
 ```
 
 ### Verifying the role sync
 1. Run `!sync` as a linked account → confirm the 4 roles apply, the nickname gains ` [level]`, and the color matches the Section ID. Run again → it should be a no-op (no role churn).
 2. Level up / change class or Section in-game, wait one interval (or `!sync`) → old managed roles are removed and new ones applied; the nickname level updates.
 3. Run `!sync` as an unlinked account → it returns the link-your-account instructions and changes nothing.
-4. Watch for `[ROLE-SYNC] Missing role "…"` warnings to spot any roles you still need to create.
+4. Run `!roles` (as an admin) to see the full role audit — which managed roles are ready, missing, or positioned above the bot — or watch for `[WARN] [ROLE-SYNC] Missing role "…"` warnings in the console/`actions.log`.

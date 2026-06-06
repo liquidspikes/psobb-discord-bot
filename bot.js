@@ -5,12 +5,13 @@ const { config } = require('./src/config');
 const { client } = require('./src/discordClient');
 const { startRoleSync } = require('./src/roleSync');
 const { registerMessageHandlers } = require('./src/messageHandler');
+const { logInfo, logWarn, logError } = require('./src/actionLog');
 
 // Attach the raw DM relay + main message handler.
 registerMessageHandlers();
 
 client.once(Events.ClientReady, async (c) => {
-    console.log("[READY] Bot is live: " + c.user.tag);
+    logInfo('SYSTEM', `Bot is live: ${c.user.tag}`);
     try {
         const cfg = config.role_sync || {};
         let guild = null;
@@ -21,9 +22,9 @@ client.once(Events.ClientReady, async (c) => {
         }
         if (!guild) guild = c.guilds.cache.first();
         if (guild) await startRoleSync(guild);
-        else console.warn('[ROLE-SYNC] No guild found; role sync not started.');
+        else logWarn('ROLE-SYNC', 'No guild found; role sync not started.');
     } catch (e) {
-        console.error('[ROLE-SYNC] Startup error:', e.message);
+        logError('ROLE-SYNC', `Startup error: ${e.message}`);
     }
 });
 
