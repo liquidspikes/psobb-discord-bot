@@ -348,7 +348,18 @@ async function handleSyncCommand(message) {
             return await message.reply('⚠️ Run `!sync` in the server (not DMs) so I can update your roles.');
         }
         const info = await apiCall('get_player', { discord_id: message.author.id });
+        // Diagnostic: record exactly what the server returned so offline-sync problems
+        // are visible via !log. If chars=0 while the player is offline, the server-side
+        // get_player_all_slots.patch is not returning save-file characters.
+        const charCount = (info && (info.Characters || info.characters) || []).length;
+        logInfo('ROLE-SYNC', `!sync data for ${message.author.tag}: linked=${info && info.linked !== false && !info.error}, is_online=${!!(info && info.is_online)}, characters=${charCount}`);
         if (!isLinked(info)) {
+            if (info && !info.error && info.linked !== false && charCount === 0) {
+                // Linked account, but the API returned no characters — almost always the
+                // offline case on a server without the save-file (all-slots) patch.
+                logWarn('ROLE-SYNC', `${message.author.tag} is linked but the API returned 0 characters (is_online=${!!info.is_online}). Likely the server is not returning offline character data.`);
+                return await message.reply('🛰️ Your account is linked, but the server returned no character data right now. This usually happens when you\'re offline on a server that only reports live characters. Try again while logged in, or ask an admin to enable offline character data.');
+            }
             return await message.reply('🔗 I couldn\'t find a linked PSOBB account. Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run `!sync` again.');
         }
         addToRoster(message.author.id);
