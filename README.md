@@ -67,7 +67,7 @@ Mirrors a linked player's **currently-active (or most-recently-played) character
 - **Display color** — comes from the **Section ID** role (Discord uses the highest *colored* role).
 
 How it runs:
-- **Automatic poll** on an interval (default 5 min). It first syncs any Discord IDs exposed by the online feed, then walks the persisted roster of known-linked members and syncs **every** linked member — online or offline — relying on the per-member signature cache so unchanged members cost no Discord API calls.
+- **Automatic poll** on an interval (default 5 min). If the online feed exposes a Discord ID it syncs those players directly; otherwise it falls back to polling a persisted roster of known-linked members and syncs whoever is online.
 - **`!sync`** for an instant, on-demand refresh of yourself.
 - **`!sync all`** (admin) to force-sync everyone linked, online or offline.
 
@@ -75,10 +75,6 @@ Per-user opt-outs (`!lock`):
 - **`!lock secid`** keeps the member's current **Section ID role** — sync neither strips it nor assigns a new one.
 - **`!lock nickname`** leaves the member's **nickname** alone — sync won't append/update the `LVL<level>` suffix.
 - Locks are stored per Discord ID in `memory/role_sync_locks.json` and apply to both the automatic tick and `!sync` / `!sync all`.
-
-> **Offline data requires the server-side `get_player_all_slots.patch`** (see [Developer & ops scripts](#developer--ops-scripts)). Without it, the psobb.io API only returns character data for players who are currently online, so offline `!sync`/poll attempts find no characters and are reported as "not linked".
-
-**Which character is synced when offline?** While a player is online the bot caches their active character name (in `last_character.json`). When that player later syncs **offline** — where the API exposes no "last played" marker — the bot uses that cached name to stay on their **last-used character**. If the bot has never seen the player online (cold start), it falls back to their **highest-level** character.
 
 Design guarantees:
 - **Assign-existing-only** — the bot never creates or recolors roles. An admin creates them once; the bot only adds/removes by name (case-insensitive).
