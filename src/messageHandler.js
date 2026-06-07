@@ -67,7 +67,7 @@ function registerMessageHandlers() {
             if (message.content.startsWith('!channels')) {
                 return await handleChannelsCommand(message);
             }
-            if (message.content.startsWith('!commands')) {
+            if (message.content.startsWith('!commands') || message.content.startsWith('!help')) {
                 return await handleHelpCommand(message);
             }
             if (message.content.startsWith('!lock') || message.content.startsWith('!unlock')) {

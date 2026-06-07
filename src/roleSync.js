@@ -558,23 +558,50 @@ async function handleLockCommand(message) {
     }
 }
 
-// Everyone command: "!commands" — list the player-facing commands. Admin commands
-// (!sync all, !roles, !channels, !log, !restart) are intentionally omitted. Note:
-// "!help" is deliberately NOT handled here — it's reserved for the website.
+// Everyone command: "!commands" (alias "!help") — list the player-facing commands
+// publicly. When an ADMIN runs it, the privileged command list (!sync all, !roles,
+// !channels, !log, !clear, !pull, !restart) is additionally DMed to them so the
+// admin surface isn't advertised in a shared channel.
 async function handleHelpCommand(message) {
-    logInfo('COMMAND', `!commands by ${message.author.tag} (${message.author.id})`);
+    const invoked = message.content.trim().split(/\s+/)[0] || '!commands';
+    logInfo('COMMAND', `${invoked} by ${message.author.tag} (${message.author.id})`);
     const lines = [
         '**`!sync`** — Update your Discord roles & nickname from your linked PSOBB character (class, level, Section ID).',
         '**`!lock secid`** — Stop me changing your **Section ID** role on syncs. `!unlock secid` allows it again.',
         '**`!lock nickname`** — Stop me changing your **nickname** on syncs. `!unlock nickname` allows it again.',
         '**`!lock`** — Show your current lock settings.',
-        '**`!commands`** — Show this message.',
+        '**`!commands`** (alias `!help`) — Show this message.',
     ];
-    const reply =
+    let reply =
         `🛰️ **PSOBB Bot — Player Commands**\n` +
         lines.map((l) => `• ${l}`).join('\n') +
         `\n\nℹ️ Not linked yet? Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run \`!sync\`.` +
         `\n💬 You can also **@mention me** or DM me to ask about your characters, stats, missions, or item drop rates.`;
+
+    // Admins also get the privileged command list — DMed, never posted publicly.
+    const isAdmin = message.guild && message.member && message.member.permissions.has('Administrator');
+    if (isAdmin) {
+        const adminLines = [
+            '**`!sync all`** — Force a full re-sync of every linked player (website roster + online), online or not.',
+            '**`!roles`** — DM you a full server **role** audit (present / missing / above the bot).',
+            '**`!channels`** — DM you a full **channel permission** audit.',
+            '**`!log`** — Show the recent bot action log.',
+            '**`!clear`** (alias `!purge`) — Bulk-delete recent messages.',
+            '**`!pull`** (aliases `!update`, `!gitpull`) — Git-pull the latest code and restart.',
+            '**`!restart`** — Restart the bot process.',
+        ];
+        const adminMsg =
+            `🔐 **PSOBB Bot — Admin Commands**${message.guild ? ` (for ${message.guild.name})` : ''}\n` +
+            adminLines.map((l) => `• ${l}`).join('\n');
+        try {
+            await message.author.send(adminMsg);
+            reply += `\n\n🔐 I also DMed you the **admin commands**.`;
+        } catch (e) {
+            logWarn('ROLE-SYNC', `${invoked} admin DM failed for ${message.author.tag}: ${e.message}`);
+            reply += `\n\n🔐 You're an admin — I tried to DM you the admin commands but couldn't. Enable DMs from server members and try again.`;
+        }
+    }
+
     return await message.reply(reply);
 }
 
@@ -820,8 +847,61 @@ async function handleChannelsCommand(message) {
     }
 }
 
+// =====================================================================
+// BOOT-TIME SELF-CHECK
+// Exercises the command handlers and the pure internal helpers on synthetic
+// data so a partial/stale deploy or a broken edit — the class of bug behind the
+// "getLastChar is not defined" failures seen mid-!sync — fails LOUDLY at startup
+// instead of silently, once per member, during a real sync. Pure: performs no
+// Discord or network calls. Throws (with every problem listed) on failure;
+// returns a one-line summary string on success.
+// =====================================================================
+function selfCheck() {
+    const problems = [];
+
+    // 1. Every handler the bot wires up, plus every internal helper on the sync
+    //    hot path, must resolve to a real function. A stale/partial module load
+    //    would surface here as `undefined`.
+    const requiredFns = {
+        startRoleSync, handleSyncCommand, handleSyncAllCommand, handleLockCommand,
+        handleHelpCommand, handleRolesCommand, handleChannelsCommand,
+        syncMember, selectProfile, computeTargetRoleNames, isStrippableRole, isLinked,
+        getLastChar, setLastChar, getLocks,
+    };
+    for (const [name, fn] of Object.entries(requiredFns)) {
+        if (typeof fn !== 'function') problems.push(`${name} is not wired (typeof = ${typeof fn})`);
+    }
+
+    // 2. Run the exact expression syncMember/handleSyncCommand use —
+    //    selectProfile(info, getLastChar(id)) → computeTargetRoleNames(profile) —
+    //    against a known fixture. This executes every internal reference on the
+    //    hot path, so a missing helper throws here at boot rather than mid-sync.
+    try {
+        const fixture = {
+            is_online: false,
+            Characters: [
+                { slot: 0, exists: true, name: 'BootCheck', class: 'HUmar', level: 42, section_id: 'Viridia' },
+                { slot: 1, exists: false },
+            ],
+        };
+        if (!isLinked(fixture)) problems.push('isLinked() returned false for a linked fixture');
+        getLocks('selfcheck'); // touch the per-user lock path
+        const profile = selectProfile(fixture, getLastChar('selfcheck'));
+        const targets = computeTargetRoleNames(profile);
+        const got = `${targets.classRole}/${targets.subRole}/${targets.levelRole}/${targets.sectionRole}/L${profile && profile.charLevel}`;
+        const want = 'Hunter/HUmar/LVL40/Viridia/L42';
+        if (got !== want) problems.push(`sync pipeline produced "${got}", expected "${want}"`);
+        if (problems.length === 0) return `role-sync self-check OK — handlers wired, sync pipeline → ${got}`;
+    } catch (e) {
+        problems.push(`sync pipeline threw: ${e.message}`);
+    }
+
+    throw new Error(`Role-sync self-check FAILED:\n - ${problems.join('\n - ')}`);
+}
+
 module.exports = {
     startRoleSync,
+    selfCheck,
     handleSyncCommand,
     handleSyncAllCommand,
     handleLockCommand,
