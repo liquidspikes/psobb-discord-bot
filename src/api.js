@@ -38,8 +38,10 @@ async function apiCall(action, params = {}) {
             headers: { 'Authorization': "Bearer " + config.psobb_api_secret },
             timeout: 5000
         });
-        const paramStr = Object.keys(params).length ? ` (${Object.keys(params).join(', ')})` : '';
-        logInfo('API', `${action}${paramStr} → ok`);
+        // Note: successful API calls are intentionally NOT logged. The role-sync tick
+        // polls get_player for every roster member each cycle, so logging each "→ ok"
+        // floods the action log. Only failures (below), role-sync updates, and the
+        // !sync all summary are recorded. Errors still capture the action + status.
         return resp.data;
     } catch (e) {
         // On HTTP errors axios exposes the server's response; capture its status and
