@@ -139,6 +139,38 @@ function isStrippableRole(role) {
 // to recognise and preserve a member's current Section ID role during a sync.
 const SECTION_ID_ROLE_SET = new Set([...SECTION_ID_NAMES].map((n) => String(n).toLowerCase()));
 
+// Text/emoji prefix prepended to every linked member's nickname on a successful
+// sync. Applied REGARDLESS of the per-user nickname lock (the lock only governs
+// the "LVL<level>" suffix). Configurable via role_sync.nickname_prefix; defaults
+// to the 💠 emoji (U+1F4A0, a real Unicode codepoint that renders in Discord
+// nicknames, unlike a custom :shortcode:). Set to "" to disable entirely.
+const NICK_PREFIX = String(
+    (config.role_sync || {}).nickname_prefix !== undefined
+        ? (config.role_sync || {}).nickname_prefix
+        : String.fromCodePoint(0x1F4A0)
+).trim();
+
+// Build a linked member's managed nickname from a raw source string (their current
+// nickname, or a name passed to !nickname). The 💠 prefix is ALWAYS kept (it's the
+// linked badge); the "LVL<level>" suffix is appended only when the member hasn't
+// locked their nickname, level-suffixing is enabled, and a level is known. When the
+// nickname is locked we preserve whatever the member kept (including any level tag).
+// Everything is fitted to Discord's 32-char nickname cap, reserving room for the
+// prefix/suffix so the LVL tag is never truncated.
+function buildManagedNick(raw, level, nicknameLocked) {
+    const src = raw || '';
+    const stripped = (NICK_PREFIX && src.startsWith(NICK_PREFIX)) ? src.slice(NICK_PREFIX.length).trimStart() : src;
+    const pre = NICK_PREFIX ? NICK_PREFIX + ' ' : '';
+    if (!nicknameLocked && (config.role_sync || {}).nickname_level !== false && level > 0) {
+        const base = stripped.replace(/\s*(\[\d+\]|LVL\d+)\s*$/i, '').trim();
+        const suffix = ` LVL${level}`;
+        const room = 32 - pre.length - suffix.length;
+        return `${pre}${room > 0 ? base.substring(0, room).trim() : ''}${suffix}`.substring(0, 32);
+    }
+    const room = 32 - pre.length;
+    return `${pre}${room > 0 ? stripped.substring(0, room).trim() : ''}`.trim().substring(0, 32);
+}
+
 // Skip redundant Discord API calls when nothing changed since last sync.
 const lastSyncSignature = new Map();
 
@@ -167,7 +199,11 @@ async function syncMember(member, playerInfo) {
     const nicknameLocked = !!locks.nickname;
     const effectiveTargets = sectionLocked ? { ...targets, sectionRole: null } : targets;
 
-    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : ''].join('|');
+    // Include whether the PSOBB nickname prefix is already present so the prefix
+    // reliably rolls out to already-synced members and self-heals if a member
+    // later removes it — even while their roles/level are otherwise unchanged.
+    const hasPrefix = !NICK_PREFIX || (member.nickname || '').startsWith(NICK_PREFIX);
+    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', hasPrefix ? 'P' : ''].join('|');
     if (lastSyncSignature.get(member.id) === sig) {
         result.skipped = true;
         result.ok = true;
@@ -225,13 +261,13 @@ async function syncMember(member, playerInfo) {
         }
     }
 
-    if (!nicknameLocked && (config.role_sync || {}).nickname_level !== false && level > 0) {
+    // Nickname update — only on a clean role sync (a "successful" sync). Always keep
+    // the 💠 prefix on a linked member (independent of the nickname lock); the
+    // "LVL<level>" suffix is maintained only when the member hasn't locked it.
+    if (!result.roleError) {
         try {
-            // Strip an existing trailing level suffix in either the old "[125]" or the
-            // current "LVL125" form, then re-append as "LVL125".
-            const baseName = (member.nickname || member.user.username).replace(/\s*(\[\d+\]|LVL\d+)\s*$/i, '').trim();
-            const newNick = `${baseName} LVL${level}`.substring(0, 32);
-            if (member.nickname !== newNick) await member.setNickname(newNick, 'PSOBB level sync');
+            const newNick = buildManagedNick(member.nickname || member.user.username, level, nicknameLocked);
+            if (member.nickname !== newNick) await member.setNickname(newNick, 'PSOBB sync');
         } catch (e) {
             result.nickError = e.message;
             logWarn('ROLE-SYNC', `Could not set nickname for ${member.user.tag}: ${e.message}`);
@@ -584,6 +620,66 @@ async function handleLockCommand(message) {
     }
 }
 
+// Everyone command: "!nickname <name>" (alias "!nick") — set your own server
+// nickname through the bot. Required because members can't change their own
+// nickname in this server (that Discord permission is removed so the bot is the
+// single source of truth for names). The 💠 linked badge is always kept; the
+// "LVL<level>" suffix is added unless the member has `!lock nickname`.
+async function handleNicknameCommand(message) {
+    try {
+        logInfo('COMMAND', `!nickname by ${message.author.tag} (${message.author.id})`);
+        if (!message.guild) {
+            return await message.reply('⚠️ Run `!nickname` in the server (not DMs).');
+        }
+
+        // Everything after the command word, with surrounding single/double quotes
+        // stripped so both `!nickname Foo` and `!nickname "Foo Bar"` work.
+        let desired = message.content.replace(/^!(nickname|nick)\b\s*/i, '').trim();
+        desired = desired.replace(/^['"]+|['"]+$/g, '').trim();
+        if (!desired) {
+            return await message.reply('Usage: `!nickname YourName` — sets your server nickname. I always keep the 💠 badge, and (unless you `!lock nickname`) your `LVL` level suffix.');
+        }
+
+        const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (!member) {
+            return await message.reply('⚠️ I couldn\'t fetch your server membership to set your nickname.');
+        }
+
+        // Only linked players get a managed nickname — the 💠 badge means "linked".
+        const info = await apiCall('get_player', { discord_id: message.author.id });
+        if (!isLinked(info)) {
+            return await message.reply('🔗 I couldn\'t find a linked PSOBB account. Sign in at https://psobb.io/login and link your Discord in your player dashboard, then try `!nickname` again.');
+        }
+
+        const nicknameLocked = !!getLocks(message.author.id).nickname;
+        const profile = selectProfile(info, getLastChar(member.id));
+        const level = (profile && profile.charLevel) || 0;
+        const newNick = buildManagedNick(desired, level, nicknameLocked);
+
+        // Guard against a name that reduces to nothing once the badge/level are
+        // stripped back out (e.g. someone passing just "LVL10").
+        if (!newNick || newNick === NICK_PREFIX) {
+            return await message.reply('Please give me an actual name, e.g. `!nickname RedRanger`.');
+        }
+
+        try {
+            await member.setNickname(newNick, 'PSOBB !nickname');
+        } catch (e) {
+            logWarn('ROLE-SYNC', `!nickname failed for ${member.user.tag}: ${e.message}`);
+            return await message.reply(`⚠️ I couldn't set your nickname: ${e.message}\n(If you're a server admin/owner, Discord won't let a bot rename you.)`);
+        }
+
+        lastSyncSignature.delete(member.id); // force the next sync to re-evaluate
+        return await message.reply(
+            `✅ Nickname set to **${newNick}**.` +
+            (nicknameLocked ? ' Your level suffix is locked, so I left it off — `!unlock nickname` to have me manage it.' : '')
+        );
+    } catch (e) {
+        logError('ROLE-SYNC', `!nickname error for ${message.author.tag}: ${e.message}`);
+        return await message.reply('📡 Could not set your nickname. Try again shortly.');
+    }
+}
+
 // Everyone command: "!commands" (alias "!help") — list the player-facing commands
 // publicly. When an ADMIN runs it, the privileged command list (!sync all, !roles,
 // !channels, !log, !clear, !pull, !restart) is additionally DMed to them so the
@@ -592,16 +688,18 @@ async function handleHelpCommand(message) {
     const invoked = message.content.trim().split(/\s+/)[0] || '!commands';
     logInfo('COMMAND', `${invoked} by ${message.author.tag} (${message.author.id})`);
     const lines = [
-        '**`!sync`** — Update your Discord roles & nickname from your linked PSOBB character (class, level, Section ID).',
+        '**`!sync`** — Update your Discord roles & nickname from your linked PSOBB character (class, level, Section ID). Linked players always get the 💠 badge on their nickname.',
+        '**`!nickname <name>`** (alias `!nick`) — Set your server nickname through me (you can\'t rename yourself directly here). Example: `!nickname RedRanger`. I keep your 💠 badge, and add your `LVL` level unless you\'ve locked your nickname.',
+        '**`!lock nickname`** — Stop me changing your **nickname** on syncs (your `LVL` suffix stops updating). `!unlock nickname` lets me manage it again. The 💠 badge always stays while you\'re linked.',
         '**`!lock secid`** — Stop me changing your **Section ID** role on syncs. `!unlock secid` allows it again.',
-        '**`!lock nickname`** — Stop me changing your **nickname** on syncs. `!unlock nickname` allows it again.',
         '**`!lock`** — Show your current lock settings.',
         '**`!commands`** (alias `!help`) — Show this message.',
     ];
     let reply =
         `🛰️ **PSOBB Bot — Player Commands**\n` +
         lines.map((l) => `• ${l}`).join('\n') +
-        `\n\nℹ️ Not linked yet? Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run \`!sync\`.` +
+        `\n\n💠 The diamond badge marks a Discord account linked to a PSOBB.io account — I keep it on your nickname automatically.` +
+        `\nℹ️ Not linked yet? Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run \`!sync\`.` +
         `\n💬 You can also **@mention me** or DM me to ask about your characters, stats, missions, or item drop rates.`;
 
     // Admins also get the privileged command list — DMed, never posted publicly.
@@ -890,9 +988,9 @@ function selfCheck() {
     //    would surface here as `undefined`.
     const requiredFns = {
         startRoleSync, handleSyncCommand, handleSyncAllCommand, handleLockCommand,
-        handleHelpCommand, handleRolesCommand, handleChannelsCommand,
+        handleNicknameCommand, handleHelpCommand, handleRolesCommand, handleChannelsCommand,
         syncMember, selectProfile, computeTargetRoleNames, isStrippableRole, isLinked,
-        getLastChar, setLastChar, getLocks,
+        getLastChar, setLastChar, getLocks, buildManagedNick,
     };
     for (const [name, fn] of Object.entries(requiredFns)) {
         if (typeof fn !== 'function') problems.push(`${name} is not wired (typeof = ${typeof fn})`);
@@ -917,7 +1015,18 @@ function selfCheck() {
         const got = `${targets.classRole}/${targets.subRole}/${targets.levelRole}/${targets.sectionRole}/L${profile && profile.charLevel}`;
         const want = 'Hunter/HUmar/LVL40/Viridia/L42';
         if (got !== want) problems.push(`sync pipeline produced "${got}", expected "${want}"`);
-        if (problems.length === 0) return `role-sync self-check OK — handlers wired, sync pipeline → ${got}`;
+
+        // Exercise the nickname builder (used by both syncMember and !nickname).
+        const nickUnlocked = buildManagedNick('BootCheck', 42, false);
+        const nickLocked = buildManagedNick('BootCheck', 42, true);
+        if (NICK_PREFIX) {
+            if (!nickUnlocked.startsWith(NICK_PREFIX)) problems.push(`buildManagedNick dropped the prefix: "${nickUnlocked}"`);
+            if (!nickLocked.startsWith(NICK_PREFIX)) problems.push(`buildManagedNick dropped the prefix when locked: "${nickLocked}"`);
+        }
+        if (!/LVL42$/.test(nickUnlocked)) problems.push(`buildManagedNick missing level suffix when unlocked: "${nickUnlocked}"`);
+        if (/LVL\d+$/.test(nickLocked)) problems.push(`buildManagedNick added a level suffix while locked: "${nickLocked}"`);
+
+        if (problems.length === 0) return `role-sync self-check OK — handlers wired, sync pipeline → ${got}, nick → "${nickUnlocked}"`;
     } catch (e) {
         problems.push(`sync pipeline threw: ${e.message}`);
     }
@@ -931,6 +1040,7 @@ module.exports = {
     handleSyncCommand,
     handleSyncAllCommand,
     handleLockCommand,
+    handleNicknameCommand,
     handleHelpCommand,
     handleRolesCommand,
     handleChannelsCommand,
@@ -939,6 +1049,7 @@ module.exports = {
     syncMember,
     selectProfile,
     computeTargetRoleNames,
+    buildManagedNick,
     isStrippableRole,
     isLinked,
 };
