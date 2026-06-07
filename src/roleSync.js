@@ -32,30 +32,45 @@ const MANAGED_ROLE_GROUPS = {
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Detect whether a get_player response represents a linked account with characters.
+// Detect whether a get_player response represents a linked account that actually has
+// at least one real character. The all-slots API returns every one of the 20 slots,
+// padding empty ones with { slot, exists: false }, so a bare length check would treat
+// a character-less account as linked. Require a slot that isn't an empty placeholder
+// (legacy/online entries have no `exists` field, so `exists !== false` keeps them).
 function isLinked(playerInfo) {
     if (!playerInfo || playerInfo.error) return false;
     if (playerInfo.linked === false) return false;
     const chars = playerInfo.Characters || playerInfo.characters;
-    return Array.isArray(chars) && chars.length > 0;
+    return Array.isArray(chars) && chars.some((c) => c && c.exists !== false);
 }
 
-// Pick the relevant character: currently active (by LastPlayerName / active flag),
-// else most recently played, falling back to the highest-level character.
-function selectProfile(playerInfo) {
+// Pick the relevant character. Preference order:
+//   1. the live "last played" character (LastPlayerName) — only present while online,
+//   2. a character flagged active,
+//   3. `fallbackName` — the last active character the bot saw for this player while
+//      they were online (Option A cache), used to keep offline syncs on their real
+//      last-used character instead of guessing,
+//   4. the highest-level character,
+//   5. the first character.
+function selectProfile(playerInfo, fallbackName = null) {
     if (!playerInfo) return null;
-    const chars = playerInfo.Characters || playerInfo.characters || [];
+    // Drop empty-slot placeholders (exists:false) so every later step — name match,
+    // active flag, highest-level fallback — only ever considers real characters.
+    const chars = (playerInfo.Characters || playerInfo.characters || []).filter((c) => c && c.exists !== false);
     if (chars.length === 0) return null;
 
+    const charNameOf = (c) => c.name || c.Name || c.character_name || c.CharacterName;
+    const findByName = (name) => name
+        ? chars.find((c) => {
+            const cName = charNameOf(c);
+            return cName && cName.toLowerCase() === String(name).toLowerCase();
+        })
+        : null;
+
     const lastPlayerName = playerInfo.LastPlayerName || playerInfo.last_player_name;
-    let chosen = null;
-    if (lastPlayerName) {
-        chosen = chars.find((c) => {
-            const cName = c.name || c.Name || c.character_name || c.CharacterName;
-            return cName && cName.toLowerCase() === lastPlayerName.toLowerCase();
-        });
-    }
+    let chosen = findByName(lastPlayerName);
     if (!chosen) chosen = chars.find((c) => c.is_active || c.isActive || c.active || c.Active);
+    if (!chosen) chosen = findByName(fallbackName);
     if (!chosen) {
         chosen = chars.reduce((best, c) => {
             const lvl = parseInt(c.level || c.Level || 0) || 0;
@@ -133,8 +148,12 @@ const lastSyncSignature = new Map();
 async function syncMember(member, playerInfo) {
     const result = { ok: false, skipped: false, applied: [], missing: [], rolesChanged: false, roleError: null, nickError: null, level: 0 };
     if (!member || !isLinked(playerInfo)) return result;
-    const profile = selectProfile(playerInfo);
+    const profile = selectProfile(playerInfo, getLastChar(member.id));
     if (!profile) return result;
+
+    // While the player is online we definitively know their active character — remember
+    // it so a later OFFLINE sync stays pinned to that same character (Option A cache).
+    if (playerInfo.is_online && profile.charName) setLastChar(member.id, profile.charName);
 
     const targets = computeTargetRoleNames(profile);
     const level = profile.charLevel || 0;
@@ -310,11 +329,14 @@ async function runRoleSyncTick(guild) {
             await delay(400);
         }
 
-        // Path B: poll the persisted roster and sync anyone currently online.
+        // Path B: poll the persisted roster and sync every linked member, online or
+        // not. Offline character data comes from the server's save-file source (see
+        // get_player_all_slots.patch); the per-member signature cache below means an
+        // unchanged member costs no Discord API calls, so this won't churn roles.
         for (const id of linkedRoster) {
             if (seen.has(id)) continue;
             const info = await apiCall('get_player', { discord_id: id });
-            if (isLinked(info) && info.is_online) {
+            if (isLinked(info)) {
                 const member = await guild.members.fetch(id).catch(() => null);
                 if (member) {
                     const r = await syncMember(member, info);
@@ -351,7 +373,27 @@ async function handleSyncCommand(message) {
             return await message.reply('⚠️ Run `!sync` in the server (not DMs) so I can update your roles.');
         }
         const info = await apiCall('get_player', { discord_id: message.author.id });
+        // Diagnostic: record exactly what the server returned so offline-sync problems
+        // are visible via !log. If chars=0 while the player is offline, the server-side
+        // get_player_all_slots.patch is not returning save-file characters.
+        const charCount = ((info && (info.Characters || info.characters)) || []).filter((c) => c && c.exists !== false).length;
+        logInfo('ROLE-SYNC', `!sync data for ${message.author.tag}: linked=${info && info.linked !== false && !info.error}, is_online=${!!(info && info.is_online)}, characters=${charCount}`);
+        // The API layer turns any HTTP failure (e.g. a 500) into { error: ... }. Surface
+        // that as a server problem rather than the misleading "you're not linked".
+        if (info && info.error) {
+            if (info.error === 'Not linked') {
+                return await message.reply('🔗 I couldn\'t find a linked PSOBB account. Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run `!sync` again.');
+            }
+            logWarn('ROLE-SYNC', `!sync: get_player API error for ${message.author.tag}: ${info.error}`);
+            return await message.reply('🛰️ The server hit an error fetching your character data. This is a **server-side** problem (often it fails for offline accounts). Please let an admin know — or try again while logged in.');
+        }
         if (!isLinked(info)) {
+            if (info && !info.error && info.linked !== false && charCount === 0) {
+                // Linked account, but the API returned no characters — almost always the
+                // offline case on a server without the save-file (all-slots) patch.
+                logWarn('ROLE-SYNC', `${message.author.tag} is linked but the API returned 0 characters (is_online=${!!info.is_online}). Likely the server is not returning offline character data.`);
+                return await message.reply('🛰️ Your account is linked, but the server returned no character data right now. This usually happens when you\'re offline on a server that only reports live characters. Try again while logged in, or ask an admin to enable offline character data.');
+            }
             return await message.reply('🔗 I couldn\'t find a linked PSOBB account. Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run `!sync` again.');
         }
         addToRoster(message.author.id);
@@ -360,7 +402,9 @@ async function handleSyncCommand(message) {
             return await message.reply('⚠️ I couldn\'t fetch your server membership to update roles.');
         }
         lastSyncSignature.delete(member.id); // force a fresh apply
-        const profile = selectProfile(info);
+        // Build the reply header from the same character syncMember will act on,
+        // including the offline last-used-character fallback (Option A cache).
+        const profile = selectProfile(info, getLastChar(member.id));
         const res = await syncMember(member, info);
 
         const header = `Character: **${profile.charName || 'Unknown'}** (Lvl ${profile.charLevel || '?'})`;
