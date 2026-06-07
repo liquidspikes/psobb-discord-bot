@@ -362,6 +362,9 @@ async function handleSyncCommand(message) {
         // The API layer turns any HTTP failure (e.g. a 500) into { error: ... }. Surface
         // that as a server problem rather than the misleading "you're not linked".
         if (info && info.error) {
+            if (info.error === 'Not linked') {
+                return await message.reply('🔗 I couldn\'t find a linked PSOBB account. Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run `!sync` again.');
+            }
             logWarn('ROLE-SYNC', `!sync: get_player API error for ${message.author.tag}: ${info.error}`);
             return await message.reply('🛰️ The server hit an error fetching your character data. This is a **server-side** problem (often it fails for offline accounts). Please let an admin know — or try again while logged in.');
         }
