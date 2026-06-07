@@ -11,6 +11,7 @@ const { ChannelType } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
+const { hasInteracted } = require('./interactions');
 const {
     SUBCLASS_TO_MAIN,
     SECTION_ID_NAMES,
@@ -150,17 +151,35 @@ const NICK_PREFIX = String(
         : String.fromCodePoint(0x1F4A0)
 ).trim();
 
+// Lurker badge: a linked member who has never interacted (no message/reaction) in
+// the server gets this instead of the 💠 diamond, until their first interaction
+// flips them. Configurable via role_sync.nickname_prefix_lurker; default 👀.
+const EYES_PREFIX = String(
+    (config.role_sync || {}).nickname_prefix_lurker !== undefined
+        ? (config.role_sync || {}).nickname_prefix_lurker
+        : '👀'
+).trim();
+
+// All prefixes the bot manages, so a nickname rebuild strips whichever is present
+// (and swaps 👀 ↔ 💠 cleanly) without ever stacking.
+const MANAGED_PREFIXES = [NICK_PREFIX, EYES_PREFIX].filter(Boolean);
+function stripManagedPrefix(s) {
+    for (const p of MANAGED_PREFIXES) {
+        if (p && s.startsWith(p)) return s.slice(p.length).trimStart();
+    }
+    return s;
+}
+
 // Build a linked member's managed nickname from a raw source string (their current
-// nickname, or a name passed to !nickname). The 💠 prefix is ALWAYS kept (it's the
-// linked badge); the "LVL<level>" suffix is appended only when the member hasn't
-// locked their nickname, level-suffixing is enabled, and a level is known. When the
-// nickname is locked we preserve whatever the member kept (including any level tag).
-// Everything is fitted to Discord's 32-char nickname cap, reserving room for the
-// prefix/suffix so the LVL tag is never truncated.
-function buildManagedNick(raw, level, nicknameLocked) {
+// nickname, or a name passed to !nickname). `prefix` is the badge to apply (💠 for
+// interacted members, 👀 for lurkers). The "LVL<level>" suffix is appended only
+// when the member hasn't locked their nickname, level-suffixing is enabled, and a
+// level is known. When locked we preserve whatever the member kept (incl. any level
+// tag). Fitted to Discord's 32-char cap, reserving room so the LVL tag is never cut.
+function buildManagedNick(raw, level, nicknameLocked, prefix = NICK_PREFIX) {
     const src = raw || '';
-    const stripped = (NICK_PREFIX && src.startsWith(NICK_PREFIX)) ? src.slice(NICK_PREFIX.length).trimStart() : src;
-    const pre = NICK_PREFIX ? NICK_PREFIX + ' ' : '';
+    const stripped = stripManagedPrefix(src);
+    const pre = prefix ? prefix + ' ' : '';
     if (!nicknameLocked && (config.role_sync || {}).nickname_level !== false && level > 0) {
         const base = stripped.replace(/\s*(\[\d+\]|LVL\d+)\s*$/i, '').trim();
         const suffix = ` LVL${level}`;
@@ -199,11 +218,14 @@ async function syncMember(member, playerInfo) {
     const nicknameLocked = !!locks.nickname;
     const effectiveTargets = sectionLocked ? { ...targets, sectionRole: null } : targets;
 
-    // Include whether the PSOBB nickname prefix is already present so the prefix
-    // reliably rolls out to already-synced members and self-heals if a member
-    // later removes it — even while their roles/level are otherwise unchanged.
-    const hasPrefix = !NICK_PREFIX || (member.nickname || '').startsWith(NICK_PREFIX);
-    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', hasPrefix ? 'P' : ''].join('|');
+    // Badge: 💠 if the member has interacted in the server, 👀 (lurker) if not.
+    // Including the interaction state + whether the expected badge is already present
+    // makes the badge roll out, swap 👀→💠 on first interaction, and self-heal if
+    // removed — even while roles/level are otherwise unchanged.
+    const interacted = hasInteracted(member.id);
+    const badge = interacted ? NICK_PREFIX : EYES_PREFIX;
+    const hasBadge = !badge || (member.nickname || '').startsWith(badge);
+    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', interacted ? 'I' : 'L', hasBadge ? 'P' : ''].join('|');
     if (lastSyncSignature.get(member.id) === sig) {
         result.skipped = true;
         result.ok = true;
@@ -262,11 +284,11 @@ async function syncMember(member, playerInfo) {
     }
 
     // Nickname update — only on a clean role sync (a "successful" sync). Always keep
-    // the 💠 prefix on a linked member (independent of the nickname lock); the
-    // "LVL<level>" suffix is maintained only when the member hasn't locked it.
+    // a badge on a linked member (💠 interacted / 👀 lurker), independent of the
+    // nickname lock; the "LVL<level>" suffix is maintained only when not locked.
     if (!result.roleError) {
         try {
-            const newNick = buildManagedNick(member.nickname || member.user.username, level, nicknameLocked);
+            const newNick = buildManagedNick(member.nickname || member.user.username, level, nicknameLocked, badge);
             if (member.nickname !== newNick) await member.setNickname(newNick, 'PSOBB sync');
         } catch (e) {
             result.nickError = e.message;
@@ -693,6 +715,10 @@ async function handleHelpCommand(message) {
         '**`!lock nickname`** — Stop me changing your **nickname** on syncs (your `LVL` suffix stops updating). `!unlock nickname` lets me manage it again. The 💠 badge always stays while you\'re linked.',
         '**`!lock secid`** — Stop me changing your **Section ID** role on syncs. `!unlock secid` allows it again.',
         '**`!lock`** — Show your current lock settings.',
+        '**`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]`** — Solve the active **❓ SPECIAL WEAPON** drop puzzle to win a reward token (stats divisible by 5; Hit ≤ 50%, others ≤ 100%).',
+        '**`!tokens`** — View your saved reward tokens (everyone, including admins).',
+        '**`!gift <token_id> @player`** — Gift one of your reward tokens to another player.',
+        '**`!claim <token_id>`** — Redeem a reward token (in-game redemption coming soon; for now it confirms your token is saved).',
         '**`!commands`** (alias `!help`) — Show this message.',
     ];
     let reply =
@@ -713,6 +739,14 @@ async function handleHelpCommand(message) {
             '**`!clear`** (alias `!purge`) — Bulk-delete recent messages.',
             '**`!pull`** (aliases `!update`, `!gitpull`) — Git-pull the latest code and restart.',
             '**`!restart`** — Restart the bot process.',
+            '**`!tekker`** — Show the current Tekker Challenge status (active drop / trigger pool).',
+            '**`!tekker roll`** — Manually roll a new Tekker Challenge puzzle right now.',
+            '**`!tekker tokens`** — DM you every reward token across all players (owner, stats, claim status).',
+            '**`!tekker grant @user N AB M D Hit`** — Mint a token with set stats for a player.',
+            '**`!tekker revoke <token_id>`** — Delete a token.',
+            '**`!tekker give <token_id> @user`** — Reassign a token to another player.',
+            '**`!tekker setclaimed <token_id> <on|off>`** — Mark a token claimed/unclaimed.',
+            '**`!tekker threshold [n]`** — View or set the drop-trigger threshold.',
         ];
         const adminMsg =
             `🔐 **PSOBB Bot — Admin Commands**${message.guild ? ` (for ${message.guild.name})` : ''}\n` +
@@ -767,7 +801,7 @@ async function auditGuildRoles(guild) {
                 status = 'ok';
                 present.push(role.name);
             }
-            groups[label].push({ name, status });
+            groups[label].push({ name, status, id: role ? role.id : null });
         }
     }
 
@@ -776,6 +810,7 @@ async function auditGuildRoles(guild) {
     const allRoles = [...guild.roles.cache.values()]
         .sort((a, b) => b.position - a.position)
         .map((r) => ({
+            id: r.id,
             name: r.name,
             position: r.position,
             managed: r.managed,
@@ -807,7 +842,7 @@ function formatRoleAudit(audit) {
     out += '\n';
 
     for (const [label, entries] of Object.entries(audit.groups)) {
-        const line = entries.map((e) => `${icon[e.status]} ${e.name}`).join('  ');
+        const line = entries.map((e) => `${icon[e.status]} ${e.name}${e.id ? ` (${e.id})` : ''}`).join('  ');
         out += `\n__${label}__\n${line}\n`;
     }
 
@@ -823,7 +858,7 @@ function formatRoleAudit(audit) {
     for (const r of audit.allRoles) {
         const label = r.isEveryone ? '@everyone' : r.name + (r.managed ? ' (integration)' : '');
         const perms = r.permissions.length ? r.permissions.join(', ') : 'none';
-        out += `\n• **${label}** [pos ${r.position}] — ${perms}`;
+        out += `\n• **${label}** [id ${r.id} · pos ${r.position}] — ${perms}`;
     }
     return out;
 }
@@ -913,14 +948,16 @@ async function auditGuildChannels(guild) {
                     const mem = guild.members.cache.get(ow.id) || await guild.members.fetch(ow.id).catch(() => null);
                     target = mem ? `@${mem.user.tag}` : `member:${ow.id}`;
                 }
-                overwrites.push({ target, allow: ow.allow.toArray(), deny: ow.deny.toArray() });
+                overwrites.push({ target, id: ow.id, allow: ow.allow.toArray(), deny: ow.deny.toArray() });
             }
         }
         result.push({
+            id: ch.id,
             name: ch.name,
             type: channelTypeLabel(ch.type),
             isCategory: ch.type === ChannelType.GuildCategory,
             parent: ch.parent ? ch.parent.name : null,
+            parentId: ch.parent ? ch.parent.id : null,
             overwrites,
         });
     }
@@ -932,16 +969,16 @@ function formatChannelAudit(audit) {
     out += `Each channel's permission overwrites are layered on top of @everyone + category defaults. "(no overwrites)" means it inherits its defaults.`;
     for (const ch of audit.channels) {
         if (ch.isCategory) {
-            out += `\n\n📁 **${ch.name}** (category)`;
+            out += `\n\n📁 **${ch.name}** (category · id ${ch.id})`;
         } else {
-            out += `\n\n#${ch.name} [${ch.type}]${ch.parent ? ` — in ${ch.parent}` : ''}`;
+            out += `\n\n#${ch.name} [${ch.type} · id ${ch.id}]${ch.parent ? ` — in ${ch.parent} (id ${ch.parentId})` : ''}`;
         }
         if (!ch.overwrites.length) {
             out += `\n   (no overwrites — inherits defaults)`;
             continue;
         }
         for (const ow of ch.overwrites) {
-            out += `\n   ${ow.target}:`;
+            out += `\n   ${ow.target} (id ${ow.id}):`;
             if (ow.allow.length) out += `\n      ✅ allow: ${ow.allow.join(', ')}`;
             if (ow.deny.length) out += `\n      ⛔ deny: ${ow.deny.join(', ')}`;
             if (!ow.allow.length && !ow.deny.length) out += `\n      (neutral — no explicit allow/deny)`;
@@ -1046,6 +1083,7 @@ module.exports = {
     handleChannelsCommand,
     auditGuildRoles,
     auditGuildChannels,
+    dmAdminReport,
     syncMember,
     selectProfile,
     computeTargetRoleNames,

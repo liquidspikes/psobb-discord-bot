@@ -9,7 +9,7 @@ const { model } = require('./model');
 const { toolHandlers } = require('./tools');
 const { loadSocialMemory } = require('./socialMemory');
 const { getCurrentPlayerSession } = require('./session');
-const { handleSyncCommand, handleSyncAllCommand, handleLockCommand, handleNicknameCommand, handleHelpCommand, handleRolesCommand, handleChannelsCommand } = require('./roleSync');
+const { handleSyncCommand, handleSyncAllCommand, handleLockCommand, handleNicknameCommand, handleHelpCommand, handleRolesCommand, handleChannelsCommand, dmAdminReport } = require('./roleSync');
 const { handleLogCommand, logInfo, logWarn } = require('./actionLog');
 const { handleRestartCommand, handlePullCommand } = require('./system');
 const { handleClearCommand } = require('./moderation');
@@ -31,6 +31,18 @@ function registerMessageHandlers() {
         }
     });
 
+    // Listen to reactions to track unique active users for the tekker challenge
+    client.on(Events.MessageReactionAdd, async (reaction, user) => {
+        if (!user || user.bot) return;
+        if (!reaction.message.guild) return;
+        try {
+            const { markInteracted } = require('./interactions');
+            markInteracted(user.id);
+            const { trackActivity } = require('./tekkerChallenge');
+            await trackActivity(user.id, reaction.message.guild, 'reaction');
+        } catch (e) {}
+    });
+
     client.on(Events.MessageCreate, async (message) => {
         if (!message || message.system || handledMessages.has(message.id)) return;
         handledMessages.add(message.id);
@@ -38,19 +50,208 @@ function registerMessageHandlers() {
 
         if (message.author && message.author.bot) return;
 
+        // Mark user as having interacted and feed activity to the tekker scanner
+        if (message.guild && message.author && !message.author.bot) {
+            const { markInteracted } = require('./interactions');
+            markInteracted(message.author.id);
+            if (!message.content.startsWith('!') && !message.content.startsWith('/')) {
+                const { trackActivity } = require('./tekkerChallenge');
+                trackActivity(message.author.id, message.guild, 'message').catch(() => {});
+            }
+        }
+
         const isDM = !message.guild;
         const isMentioned = message.mentions.has(client.user);
-        const isCommand = message.content.startsWith('!');
+        const isCommand = message.content.startsWith('!') || message.content.startsWith('/');
         const isConfigChannel = message.channel.id === config.channel_id;
 
         if (!isDM && !isMentioned && !isCommand && !isConfigChannel) return;
         if (isCommand) {
+            if (message.content.startsWith('/guess') || message.content.startsWith('!guess')) {
+                logInfo('COMMAND', `guess by ${message.author.tag} (${message.author.id})`);
+                const args = message.content.replace(/^[\/!]guess\s*/i, '').trim().split(/\s+/);
+                const { processGuess } = require('./tekkerChallenge');
+                return await processGuess(message, args);
+            }
+            if (message.content.startsWith('!claim')) {
+                logInfo('COMMAND', `!claim by ${message.author.tag} (${message.author.id})`);
+                const parts = message.content.trim().split(/\s+/);
+                const tokenId = parts[1];
+                if (!tokenId) return await message.reply("⚠️ Usage: `!claim <token_id>` (e.g. `!claim T-ABCD12`)");
+                const { claimReward } = require('./tekkerChallenge');
+                const res = await claimReward(message.author.id, tokenId.trim().toUpperCase());
+                if (res.success) {
+                    return await message.reply(`✅ **Reward claimed!** ${res.message}`);
+                } else if (res.pending) {
+                    return await message.reply(`🪙 ${res.message}`);
+                } else {
+                    return await message.reply(`❌ **Claim failed**: ${res.error}`);
+                }
+            }
+            if (message.content.startsWith('!gift')) {
+                logInfo('COMMAND', `!gift by ${message.author.tag} (${message.author.id})`);
+                const parts = message.content.trim().split(/\s+/);
+                const tokenId = parts[1];
+                const targetUser = message.mentions.users.first() || (parts[2] ? { id: parts[2] } : null);
+                if (!tokenId || !targetUser) {
+                    return await message.reply("⚠️ Usage: `!gift <token_id> @PlayerName` (e.g. `!gift T-ABCD12 @Friend`)");
+                }
+                const { giftReward } = require('./tekkerChallenge');
+                const res = await giftReward(message.author.id, tokenId.trim().toUpperCase(), targetUser.id);
+                if (res.success) {
+                    return await message.reply(`🎁 **Gifted successfully!** Transferred token \`${tokenId.trim().toUpperCase()}\` (❓ SPECIAL WEAPON ${res.token.stat_native}/${res.token.stat_abeast}/${res.token.stat_machine}/${res.token.stat_dark}/${res.token.stat_hit}) to <@${targetUser.id}>.`);
+                } else {
+                    return await message.reply(`❌ **Gift failed**: ${res.error}`);
+                }
+            }
+            if (message.content.startsWith('!tokens')) {
+                logInfo('COMMAND', `!tokens by ${message.author.tag} (${message.author.id})`);
+                const db = require('./tekkerDb');
+                const tokens = await db.getUnclaimedTokens(message.author.id);
+                if (tokens.length === 0) {
+                    return await message.reply("ℹ️ You have no unclaimed weapon tokens. Solve a `/guess` puzzle in the channel to earn one!");
+                }
+                const lines = tokens.map(t => `• \`${t.token_id}\` — **❓ SPECIAL WEAPON** (${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit})`);
+                return await message.reply(`🎁 **Your Saved Weapon Tokens**:\n${lines.join('\n')}\n\n*Your tokens are saved to your account. In-game claiming is coming soon — for now use \`!gift <token_id> @PlayerName\` to transfer one to a friend.*`);
+            }
+            if (message.content.startsWith('!tekker')) {
+                const parts = message.content.trim().split(/\s+/);
+                const sub = (parts[1] || '').toLowerCase();
+                logInfo('COMMAND', `!tekker ${sub || '(status)'} by ${message.author.tag} (${message.author.id})`);
+
+                const db = require('./tekkerDb');
+
+                if (sub === 'roll' || sub === 'start') {
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker roll` is for server admins only.');
+                    }
+                    const { generateDrop, announceDrop } = require('./tekkerChallenge');
+                    await db.clearActiveUsers();
+                    const drop = await generateDrop();
+                    await announceDrop(drop);
+                    logInfo('TEKKER', `Manual drop rolled by admin ${message.author.tag}: stats ${drop.stat_native}/${drop.stat_abeast}/${drop.stat_machine}/${drop.stat_dark}/${drop.stat_hit}, hint ${drop.hint_attribute}=0%.`);
+                    return await message.reply(`🚨 **New Tekker Challenge puzzle rolled manually by admin!**`);
+                } else if (sub === 'tokens' || sub === 'all') {
+                    // Admin oversight: every token earned across all players (real weapon
+                    // names shown — this is the admin view used to fulfil claims).
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker tokens` is for server admins only.');
+                    }
+                    const all = await db.getAllTokens();
+                    if (!all.length) {
+                        return await message.reply('ℹ️ No Tekker tokens have been earned yet.');
+                    }
+                    const unclaimed = all.filter(t => !t.is_claimed).length;
+                    const lines = all.map(t => {
+                        const stats = `${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit}`;
+                        const status = t.is_claimed
+                            ? `claimed by <@${t.claimed_by}> at ${t.claimed_at}`
+                            : 'UNCLAIMED';
+                        return `• \`${t.token_id}\` — stats **${stats}** — owner <@${t.owner_id}> — ${status}`;
+                    });
+                    const report = `**Tekker Tokens — ${all.length} total · ${unclaimed} unclaimed · ${all.length - unclaimed} claimed**\n` + lines.join('\n');
+                    if (await dmAdminReport(message, report, '!tekker tokens')) {
+                        return await message.reply(`📬 Sent you all ${all.length} Tekker token(s) in a DM.`);
+                    }
+                    return;
+                } else if (sub === 'grant') {
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker grant` is for server admins only.');
+                    }
+                    const target = message.mentions.users.first();
+                    const nums = parts.slice(2).filter(p => /^\d+$/.test(p)).map(Number);
+                    if (!target || nums.length !== 5) {
+                        return await message.reply('⚠️ Usage: `!tekker grant @user <Native> <A.Beast> <Machine> <Dark> <Hit>` (e.g. `!tekker grant @User 0 90 0 55 20`).');
+                    }
+                    const { adminGrantToken } = require('./tekkerChallenge');
+                    const gres = await adminGrantToken(target.id, nums);
+                    if (gres.error) return await message.reply(`❌ ${gres.error}`);
+                    logInfo('TEKKER', `Admin ${message.author.tag} granted token ${gres.tokenId} (${nums.join('/')}) to ${target.id}`);
+                    return await message.reply(`✅ Granted token \`${gres.tokenId}\` (stats **${nums.join('/')}**) to <@${target.id}>.`);
+                } else if (sub === 'revoke' || sub === 'delete') {
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker revoke` is for server admins only.');
+                    }
+                    const tokenId = (parts[2] || '').toUpperCase();
+                    if (!tokenId) return await message.reply('⚠️ Usage: `!tekker revoke <token_id>`.');
+                    const tok = await db.getToken(tokenId);
+                    if (!tok) return await message.reply(`❌ Token \`${tokenId}\` not found.`);
+                    await db.deleteToken(tokenId);
+                    logInfo('TEKKER', `Admin ${message.author.tag} revoked token ${tokenId} (was owner ${tok.owner_id})`);
+                    return await message.reply(`🗑️ Revoked token \`${tokenId}\` (was owned by <@${tok.owner_id}>).`);
+                } else if (sub === 'give' || sub === 'setowner') {
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker give` is for server admins only.');
+                    }
+                    const tokenId = (parts[2] || '').toUpperCase();
+                    const target = message.mentions.users.first();
+                    if (!tokenId || !target) return await message.reply('⚠️ Usage: `!tekker give <token_id> @user`.');
+                    const tok = await db.getToken(tokenId);
+                    if (!tok) return await message.reply(`❌ Token \`${tokenId}\` not found.`);
+                    await db.transferToken(tokenId, target.id);
+                    logInfo('TEKKER', `Admin ${message.author.tag} reassigned token ${tokenId} → ${target.id}`);
+                    return await message.reply(`🔁 Reassigned token \`${tokenId}\` to <@${target.id}>.`);
+                } else if (sub === 'setclaimed') {
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker setclaimed` is for server admins only.');
+                    }
+                    const tokenId = (parts[2] || '').toUpperCase();
+                    const flag = (parts[3] || '').toLowerCase();
+                    const claimed = ['on', '1', 'true', 'yes'].includes(flag) ? 1 : (['off', '0', 'false', 'no'].includes(flag) ? 0 : null);
+                    if (!tokenId || claimed === null) return await message.reply('⚠️ Usage: `!tekker setclaimed <token_id> <on|off>`.');
+                    const tok = await db.getToken(tokenId);
+                    if (!tok) return await message.reply(`❌ Token \`${tokenId}\` not found.`);
+                    await db.setTokenClaimed(tokenId, claimed, message.author.id);
+                    logInfo('TEKKER', `Admin ${message.author.tag} set token ${tokenId} claimed=${claimed}`);
+                    return await message.reply(`✅ Token \`${tokenId}\` marked **${claimed ? 'claimed' : 'unclaimed'}**.`);
+                } else if (sub === 'threshold') {
+                    if (!message.member || !message.member.permissions.has('Administrator')) {
+                        return await message.reply('🔒 `!tekker threshold` is for server admins only.');
+                    }
+                    if (parts[2] === undefined) {
+                        const cur = await db.getTriggerThreshold();
+                        return await message.reply(`🎚️ Current trigger threshold: **${cur}** unique linked contributors.`);
+                    }
+                    const v = parseInt(parts[2], 10);
+                    if (Number.isNaN(v) || v < 1) return await message.reply('⚠️ Usage: `!tekker threshold <positive number>`.');
+                    await db.setTriggerThreshold(v);
+                    logInfo('TEKKER', `Admin ${message.author.tag} set trigger threshold to ${v}`);
+                    return await message.reply(`🎚️ Trigger threshold set to **${v}**.`);
+                } else {
+                    const drop = await db.getActiveDrop();
+                    const uniqueUsers = await db.getActiveUserCount();
+                    const threshold = await db.getTriggerThreshold();
+                    
+                    if (drop) {
+                        const EMOJIS = { "Native": "🗡️", "A.Beast": "🐾", "Machine": "🤖", "Dark": "👻", "Hit": "🎯" };
+                        return await message.reply(
+                            `🎮 **Tekker Challenge Status**\n` +
+                            `• Active Drop: **[❓ SPECIAL WEAPON]**\n` +
+                            `• Scanner Hint: **${EMOJIS[drop.hint_attribute]} ${drop.hint_attribute}** is **0%**.\n\n` +
+                            `*Use \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` to claim it!*`
+                        );
+                    } else {
+                        const P = Math.min(100, (uniqueUsers / threshold) * 100);
+                        return await message.reply(
+                            `📡 **Tekker Challenge Status**\n` +
+                            `• No active drop detected.\n` +
+                            `• Active users pool: **${uniqueUsers}/${threshold}** unique linked contributors.\n` +
+                            `• Next drop chance: **${P.toFixed(1)}%** on subsequent linked user interactions.\n\n` +
+                            `*Chat, react, or hang out in voice channels to trigger the scanner!*`
+                        );
+                    }
+                }
+            }
             if (message.content.startsWith('!quest') || message.content.startsWith('$quest')) {
                 logInfo('COMMAND', `!quest (deprecated) by ${message.author.tag}`);
                 return await message.reply("📡 **Notice:** The manual `!quest` command has been deprecated. Mission Command now monitors your progress automatically! You will receive random bounties directly to your Guild Card while playing on the server.");
             }
             if (message.content.startsWith('!log')) {
                 return await handleLogCommand(message);
+            }
+            if (message.content.startsWith('!interactions')) {
+                const { handleInteractionsCommand } = require('./interactions');
+                return await handleInteractionsCommand(message);
             }
             if (message.content.startsWith('!restart')) {
                 return await handleRestartCommand(message);

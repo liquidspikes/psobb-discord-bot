@@ -1,19 +1,29 @@
 // Entry point for the PSOBB Discord bot.
 // All logic lives in ./src/* modules; this file just wires events and logs in.
-const { Events } = require('discord.js');
+const { Events, ChannelType } = require('discord.js');
 const { config } = require('./src/config');
 const { client } = require('./src/discordClient');
 const { startRoleSync, selfCheck } = require('./src/roleSync');
 const { startLfgWatcher } = require('./src/lfg');
+const { startPartyRooms } = require('./src/partyRooms');
 const { registerMessageHandlers } = require('./src/messageHandler');
 const { logInfo, logWarn, logError } = require('./src/actionLog');
 const { announceStartup } = require('./src/system');
+const { initDb } = require('./src/tekkerDb');
+const { trackActivity } = require('./src/tekkerChallenge');
 
 // Attach the raw DM relay + main message handler.
 registerMessageHandlers();
 
 client.once(Events.ClientReady, async (c) => {
     logInfo('SYSTEM', `Bot is live: ${c.user.tag}`);
+
+    // Initialize SQLite Tekker Database
+    try {
+        await initDb();
+    } catch (e) {
+        logError('SYSTEM', `Failed to initialize tekker database: ${e.message}`);
+    }
 
     // Boot-time integrity gate: catch a stale/partial deploy (e.g. the running
     // file missing a helper the sync path references) before it can fail silently
@@ -39,6 +49,41 @@ client.once(Events.ClientReady, async (c) => {
         if (guild) {
             await startRoleSync(guild);
             await announceStartup(guild, selfCheckResult);
+            // Party voice rooms — needs the resolved guild; isolated so a failure
+            // here can't take down role sync (and vice versa).
+            try {
+                await startPartyRooms(guild);
+            } catch (e) {
+                logError('PARTY', `Startup error: ${e.message}`);
+            }
+
+            // Start voice activity tracking loop for the tekker challenge
+            setInterval(async () => {
+                try {
+                    const channels = await guild.channels.fetch().catch(() => null);
+                    if (!channels) return;
+
+                    for (const channel of channels.values()) {
+                        // ChannelType.GuildVoice = 2
+                        if (channel.type === ChannelType.GuildVoice) {
+                            const members = channel.members;
+                            // Ignore bots, self-muted, self-deafened, or solo users
+                            const activeMembers = members.filter(m => 
+                                !m.user.bot && 
+                                !m.voice.selfMute && 
+                                !m.voice.selfDeaf && 
+                                members.size > 1
+                            );
+
+                            for (const member of activeMembers.values()) {
+                                await trackActivity(member.id, guild, 'voice').catch(() => {});
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logError('SYSTEM', `Error in voice activity tracking loop: ${e.message}`);
+                }
+            }, 60000); // Poll every 1 minute
         } else {
             logWarn('ROLE-SYNC', 'No guild found; role sync not started.');
         }

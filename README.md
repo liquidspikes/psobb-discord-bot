@@ -16,9 +16,21 @@ Entry point is [`bot.js`](bot.js); the implementation is split into focused modu
 - Conversational replies in DMs, when **@mentioned**, in the configured channel, or via commands.
 - Grounded in a **local knowledge base**: [`knowledge.md`](knowledge.md) (core lore/server knowledge) plus every `*.md` file under [`rag/`](rag/) (class deep-dives, quests, drop tables, government tasks, area progression, etc.).
 - **Tone adapts to player level** — kind to new players (Lvl 1–20), sassy to veterans (Lvl 100+).
-- **Per-user social memory** — persists notes/relationships about each user under the memory directory and recalls them on the next interaction.
+- Per-user social memory — persists notes/relationships about each user under the memory directory and recalls them on the next interaction.
 - Long replies are auto-split to respect Discord's 2000-character message limit.
 - Public-channel history is isolated per user so the bot doesn't leak other people's context.
+
+### Tekker Challenge (Minigame)
+- Interactive Discord minigame where users guess hidden stats of a weapon (`❓ SPECIAL WEAPON`).
+- Higher/Lower feedback mapped to standard emojis (🗡️, 🐾, 🤖, 👻, 🎯).
+- Server boosters get 8 attempts, while base users get 5 attempts.
+- Forced zero hint: the generator forces one weapon attribute to `0%` and uses it as the hint.
+- Uniqueness-based activity trigger: message, reaction, and voice activity from linked users rolls a random chance to spawn a new puzzle, naturally preventing spam.
+- Reward tokens: winning generates a unique claim code (`T-XXXXXX`) that users can check via `!tokens`, gift via `!gift`, or claim via `!claim`.
+
+### Interaction Log & Lurker Badges
+- A persistent record (`interactions.json`) tracking if users have ever sent a message or added a reaction.
+- Displays a lurker badge (`👀`) for linked members who have never chatted or reacted on the server, or a active badge (`💠`) for those who have. Badges swap dynamically on their first activity.
 
 ### Live server tools (function calling)
 The model can call these tools against the server API / website:
@@ -44,6 +56,10 @@ The model can call these tools against the server API / website:
 - `!lock secid` / `!unlock secid` — opt out of (or back into) the bot changing your **Section ID role** on a sync.
 - `!lock nickname` / `!unlock nickname` — opt out of (or back into) the bot changing your **nickname** on a sync. `!lock` on its own shows your current settings.
 - `!quest` / `$quest` — deprecated; returns a notice that bounties are now automatic.
+- `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` (or `!guess`) — Guess the hidden stats of the active `❓ SPECIAL WEAPON` drop.
+- `!tokens` — View your saved, unclaimed reward tokens.
+- `!gift <token_id> @User` — Gift one of your reward tokens to another player.
+- `!claim <token_id>` — Claim a reward token to drop it in-game.
 
 **Admin commands** (require the **Administrator** permission; the report is sent to the requester via **DM**)
 - `!sync all` — force a full re-sync of **every linked player** (everyone linked on the website, unioned with the persisted roster + currently-online players), online or offline. Posts a live progress line and a final summary. Respects each member's `!lock` settings.
@@ -51,6 +67,17 @@ The model can call these tools against the server API / website:
 - `!channels` — DMs a full **channel permission audit**: every channel (grouped under its category) with its **permission overwrites** — the per-role / per-member allow ✅ and deny ⛔ rules layered on the `@everyone` defaults.
 - `!log [lines]` — DMs the most recent **backend actions** the bot has taken (role syncs, nickname changes, command invocations, PSOBB API calls, session lookups, tool executions, and errors — everything except the AI conversation itself). Defaults to the last 50; `!log 200` pulls the last 200 (see [Action log](#action-log)).
 - `!restart` — **restarts the bot.** It confirms in-channel, then exits cleanly; the service supervisor relaunches a fresh process within a few seconds. **Requires the process to be supervised with an auto-restart policy** (see [Running as a service](#running-as-a-service)).
+- `!tekker` — Show the current Tekker status (active drop, trigger pool, and threshold).
+- `!tekker roll` (or `!tekker start`) — Force roll a new drop puzzle manually.
+- `!tekker tokens` — DMs all reward tokens across all players (unclaimed, claimed, owner).
+- `!tekker grant @User <Native> <A.Beast> <Machine> <Dark> <Hit>` — Grant a token with specified stats.
+- `!tekker revoke <token_id>` — Delete a token.
+- `!tekker give <token_id> @User` — Reassign a token to another user.
+- `!tekker setclaimed <token_id> <on/off>` — Mark a token as claimed/unclaimed.
+- `!tekker threshold [n]` — View or set the drop-trigger unique user threshold.
+- `!interactions` — Display stats for the interaction log.
+- `!interactions build` — Build/census the log, adding all current server members with `interacted: false`.
+- `!interactions check @User` — Inspect the interaction status of a specific user.
 
 - `!clear <count>` (alias `!purge <count>`) — **bulk-deletes the last `<count>` messages** in the channel it's run in. The count is required and explicit (e.g. `!clear 50`); it's capped at 500 and, per Discord's rules, can only remove messages newer than 14 days. The bot needs **Manage Messages** in that channel. **Clears over 100 messages require a react-to-confirm** (✅ within 30s) from the admin who ran it. Every use is logged (who cleared how many, where), and a short self-deleting confirmation is posted.
 
@@ -64,6 +91,7 @@ Mirrors a linked player's **currently-active (or most-recently-played) character
 - **Level role** — `Rookie` (Lvl 1–9), then `LVL10`, `LVL20`, … `LVL200`.
 - **Section ID role** — one of `Viridia`, `Greenill`, `Skyly`, `Bluefull`, `Purplenum`, `Pinkal`, `Redria`, `Oran`, `Yellowboze`, `Whitill`.
 - **Nickname** — the character's live level is appended as `LVL<level>`, e.g. `Hunter Joe LVL142`.
+- **Lurker Badge** — linked members who have never commented or reacted on the server get the `👀` badge prepended to their nickname, while active members get the `💠` badge. Swaps automatically on their first activity.
 - **Display color** — comes from the **Section ID** role (Discord uses the highest *colored* role).
 
 How it runs:
@@ -199,12 +227,14 @@ nicknames. Set `"enabled": false` to turn the whole role system off.
 | `src/actionLog.js` | Central action-log system (ring buffer + persistent file) and the `!log` command. |
 | `src/system.js` | Process-level admin commands (the `!restart` command). |
 | `src/messageHandler.js` | DM relay + main message/command/AI handler. |
+| `src/interactions.js` | Persistent user interaction logging and admin commands. |
 | `knowledge.md` | Core lore / server knowledge loaded into the system prompt. |
 | `rag/*.md` | Knowledge-base sources (classes, quests, drops, government tasks, etc.). |
 | `/psobb-bot/discord_config.json` | Runtime configuration (not in the repo). |
 | `/psobb-bot/memory/<discordId>.json` | Per-user social memory. |
 | `/psobb-bot/memory/linked_roster.json` | Persisted set of Discord IDs known to be linked (role-sync fallback). |
 | `/psobb-bot/memory/last_character.json` | Last active character name seen per Discord ID while online — pins **offline** syncs to the player's last-used character. |
+| `/psobb-bot/memory/interactions.json` | JSON map of user IDs to boolean interaction statuses. |
 | `/psobb-bot/memory/questions.log` | Append-only log of incoming questions. |
 | `/psobb-bot/memory/actions.log` | Persistent backend action log surfaced by `!log` (auto-trimmed to ~8–10k lines). |
 
@@ -218,6 +248,8 @@ These live at the repo root and are run manually (not part of the bot process):
 | --- | --- |
 | `test_api.js` | Quick smoke test of the PSOBB API — prints `get_online_players` and `get_events` responses. Run `node test_api.js`. |
 | `diag_get_player.js` | Dumps the raw `get_player` API response for one Discord ID so you can see how many character slots the server returns and each slot's index/fields. Run `node diag_get_player.js <discord_id>`. |
+| `scratch/test_interactions.js` | Tests user interaction logging, bulk tracking, and nickname badge builder. Run `node scratch/test_interactions.js`. |
+| `scratch/test_tekker.js` | Tests the Tekker Challenge game loops and token flows using a mock API backend database client. Run `node scratch/test_tekker.js`. |
 | `get_player_all_slots.patch` | **Server-side patch for the psobb.io _website_ repo** ([`liquidspikes/psobb.io-website-public`](https://github.com/liquidspikes/psobb.io-website-public)), not this bot. It rewrites `api/bot_api.php`'s `get_player` action to enumerate **all** character save slots (0–19) instead of only the classic 4. Apply it there with `git apply get_player_all_slots.patch`, then `php -l api/bot_api.php`, then deploy. The bot needs no change to consume the extra slots. |
 
 > The character-slot limit is a server-side concern: the bot already forwards every character the API returns. `diag_get_player.js` confirms the count before/after applying the patch.
