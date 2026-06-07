@@ -9,7 +9,7 @@ const { model } = require('./model');
 const { toolHandlers } = require('./tools');
 const { loadSocialMemory } = require('./socialMemory');
 const { getCurrentPlayerSession } = require('./session');
-const { handleSyncCommand, handleRolesCommand, handleChannelsCommand } = require('./roleSync');
+const { handleSyncCommand, handleSyncAllCommand, handleLockCommand, handleHelpCommand, handleRolesCommand, handleChannelsCommand } = require('./roleSync');
 const { handleLogCommand, logInfo, logWarn } = require('./actionLog');
 const { handleRestartCommand, handlePullCommand } = require('./system');
 const { handleClearCommand } = require('./moderation');
@@ -66,6 +66,15 @@ function registerMessageHandlers() {
             }
             if (message.content.startsWith('!channels')) {
                 return await handleChannelsCommand(message);
+            }
+            if (message.content.startsWith('!commands')) {
+                return await handleHelpCommand(message);
+            }
+            if (message.content.startsWith('!lock') || message.content.startsWith('!unlock')) {
+                return await handleLockCommand(message);
+            }
+            if (/^!sync\s+all\b/i.test(message.content)) {
+                return await handleSyncAllCommand(message);
             }
             if (message.content.startsWith('!sync')) {
                 return await handleSyncCommand(message);

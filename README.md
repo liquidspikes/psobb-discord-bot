@@ -38,11 +38,15 @@ The model can call these tools against the server API / website:
 ### Commands
 
 **Player commands**
+- `!commands` — lists the player-facing commands and how to use them (admin commands are omitted). (`!help` is intentionally left for the website.)
 - `!stats`, `!quests`, `!progress`, `!progression` — routed to the AI (which calls `get_player_info` and reports character stats / quest & area-unlock progress).
 - `!sync` — **manually refresh your roles and nickname** from your linked PSOBB account (see below). Reports the real outcome, including any missing roles or hierarchy/permission problems that blocked the change.
+- `!lock secid` / `!unlock secid` — opt out of (or back into) the bot changing your **Section ID role** on a sync.
+- `!lock nickname` / `!unlock nickname` — opt out of (or back into) the bot changing your **nickname** on a sync. `!lock` on its own shows your current settings.
 - `!quest` / `$quest` — deprecated; returns a notice that bounties are now automatic.
 
 **Admin commands** (require the **Administrator** permission; the report is sent to the requester via **DM**)
+- `!sync all` — force a full re-sync of **every linked player** (everyone linked on the website, unioned with the persisted roster + currently-online players), online or offline. Posts a live progress line and a final summary. Respects each member's `!lock` settings.
 - `!roles` — DMs a full **role audit**: classifies the bot's managed identity roles into ✅ ready / ❌ missing / ⬆️ above-the-bot, reports the bot's own Manage Roles permission and hierarchy position, and lists **every role on the server with the exact permissions it grants**.
 - `!channels` — DMs a full **channel permission audit**: every channel (grouped under its category) with its **permission overwrites** — the per-role / per-member allow ✅ and deny ⛔ rules layered on the `@everyone` defaults.
 - `!log [lines]` — DMs the most recent **backend actions** the bot has taken (role syncs, nickname changes, command invocations, PSOBB API calls, session lookups, tool executions, and errors — everything except the AI conversation itself). Defaults to the last 50; `!log 200` pulls the last 200 (see [Action log](#action-log)).
@@ -59,12 +63,18 @@ Mirrors a linked player's **currently-active (or most-recently-played) character
 - **Subclass role** — one of the 12 (`HUmar`, `HUnewearl`, `HUcast`, `HUcaseal`, `RAmar`, `RAmarl`, `RAcast`, `RAcaseal`, `FOmar`, `FOmarl`, `FOnewm`, `FOnewearl`).
 - **Level role** — `Rookie` (Lvl 1–9), then `LVL10`, `LVL20`, … `LVL200`.
 - **Section ID role** — one of `Viridia`, `Greenill`, `Skyly`, `Bluefull`, `Purplenum`, `Pinkal`, `Redria`, `Oran`, `Yellowboze`, `Whitill`.
-- **Nickname** — the character's live level is appended, e.g. `Hunter Joe [142]`.
+- **Nickname** — the character's live level is appended as `LVL<level>`, e.g. `Hunter Joe LVL142`.
 - **Display color** — comes from the **Section ID** role (Discord uses the highest *colored* role).
 
 How it runs:
 - **Automatic poll** on an interval (default 5 min). It first syncs any Discord IDs exposed by the online feed, then walks the persisted roster of known-linked members and syncs **every** linked member — online or offline — relying on the per-member signature cache so unchanged members cost no Discord API calls.
-- **`!sync`** for an instant, on-demand refresh.
+- **`!sync`** for an instant, on-demand refresh of yourself.
+- **`!sync all`** (admin) to force-sync everyone linked, online or offline.
+
+Per-user opt-outs (`!lock`):
+- **`!lock secid`** keeps the member's current **Section ID role** — sync neither strips it nor assigns a new one.
+- **`!lock nickname`** leaves the member's **nickname** alone — sync won't append/update the `LVL<level>` suffix.
+- Locks are stored per Discord ID in `memory/role_sync_locks.json` and apply to both the automatic tick and `!sync` / `!sync all`.
 
 > **Offline data requires the server-side `get_player_all_slots.patch`** (see [Developer & ops scripts](#developer--ops-scripts)). Without it, the psobb.io API only returns character data for players who are currently online, so offline `!sync`/poll attempts find no characters and are reported as "not linked".
 
@@ -84,7 +94,7 @@ What's captured, by category:
 | Category | Examples |
 | --- | --- |
 | `SYSTEM` | Bot startup / ready. |
-| `COMMAND` | `!sync`, `!roles`, `!channels`, `!log`, `!quest` (deprecated), `!stats`/`!quests`/`!progress` — with who ran them. |
+| `COMMAND` | `!sync`, `!sync all`, `!lock`/`!unlock`, `!commands`, `!roles`, `!channels`, `!log`, `!quest` (deprecated), `!stats`/`!quests`/`!progress` — with who ran them. |
 | `ROLE-SYNC` | Per-member sync results, missing/unmanageable roles, nickname changes, roster additions, tick summaries, errors. |
 | `API` | Every PSOBB API call (success + failure). |
 | `DROPS` | Drop-table fetches / cache fallbacks. |
@@ -267,7 +277,7 @@ On startup you should see (action-log entries are tagged `[LEVEL] [CATEGORY]`):
 ```
 
 ### Verifying the role sync
-1. Run `!sync` as a linked account → confirm the 4 roles apply, the nickname gains ` [level]`, and the color matches the Section ID. Run again → it should be a no-op (no role churn).
+1. Run `!sync` as a linked account → confirm the 4 roles apply, the nickname gains ` LVL<level>`, and the color matches the Section ID. Run again → it should be a no-op (no role churn). Then `!lock secid` and `!lock nickname`, change Section ID / level in-game, and `!sync` again → the Section ID role and nickname stay put while other roles update.
 2. Level up / change class or Section in-game, wait one interval (or `!sync`) → old managed roles are removed and new ones applied; the nickname level updates.
 3. Run `!sync` as an unlinked account → it returns the link-your-account instructions and changes nothing.
 4. Run `!roles` (as an admin) to see the full role audit — which managed roles are ready, missing, or positioned above the bot — or watch for `[WARN] [ROLE-SYNC] Missing role "…"` warnings in the console/`actions.log`.
