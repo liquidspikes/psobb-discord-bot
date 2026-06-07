@@ -271,6 +271,32 @@ function addToRoster(id) {
     } catch (e) { logError('ROLE-SYNC', `Roster save error: ${e.message}`); }
 }
 
+// Option A cache: the last active character name the bot observed for each Discord ID
+// while that player was ONLINE. Used to keep offline syncs pinned to the player's real
+// last-used character instead of falling back to their highest-level one.
+const LAST_CHAR_PATH = path.join(MEMORY_DIR, 'last_character.json');
+function loadLastChars() {
+    try {
+        if (fs.existsSync(LAST_CHAR_PATH)) {
+            const obj = JSON.parse(fs.readFileSync(LAST_CHAR_PATH, 'utf8'));
+            if (obj && typeof obj === 'object') return new Map(Object.entries(obj));
+        }
+    } catch (e) { logError('ROLE-SYNC', `Last-character load error: ${e.message}`); }
+    return new Map();
+}
+let lastChars = loadLastChars();
+function getLastChar(id) {
+    return lastChars.get(String(id)) || null;
+}
+function setLastChar(id, name) {
+    id = String(id);
+    if (!name || lastChars.get(id) === name) return; // no change → no disk write
+    lastChars.set(id, name);
+    try {
+        fs.writeFileSync(LAST_CHAR_PATH, JSON.stringify(Object.fromEntries(lastChars), null, 2));
+    } catch (e) { logError('ROLE-SYNC', `Last-character save error: ${e.message}`); }
+}
+
 // Persisted per-user sync locks: { [discordId]: { secid?: true, nickname?: true } }.
 // A member can opt out of having their Section ID role and/or nickname overwritten
 // by the sync, via "!lock secid" / "!lock nickname".
