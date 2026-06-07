@@ -120,6 +120,10 @@ function isStrippableRole(role) {
     return zeroPerms || MANAGED_ROLE_NAMES.has(role.name.toLowerCase());
 }
 
+// Section ID role names (lowercased) — used by the per-user "!lock secid" feature
+// to recognise and preserve a member's current Section ID role during a sync.
+const SECTION_ID_ROLE_SET = new Set([...SECTION_ID_NAMES].map((n) => String(n).toLowerCase()));
+
 // Skip redundant Discord API calls when nothing changed since last sync.
 const lastSyncSignature = new Map();
 
@@ -135,7 +139,16 @@ async function syncMember(member, playerInfo) {
     const targets = computeTargetRoleNames(profile);
     const level = profile.charLevel || 0;
     result.level = level;
-    const sig = [targets.classRole, targets.subRole, targets.levelRole, targets.sectionRole, level].join('|');
+
+    // Per-user locks (set via "!lock secid" / "!lock nickname"). When Section ID is
+    // locked we neither apply a new Section ID role nor strip the member's current
+    // one; when nickname is locked we skip the level-suffix nickname update entirely.
+    const locks = getLocks(member.id);
+    const sectionLocked = !!locks.secid;
+    const nicknameLocked = !!locks.nickname;
+    const effectiveTargets = sectionLocked ? { ...targets, sectionRole: null } : targets;
+
+    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : ''].join('|');
     if (lastSyncSignature.get(member.id) === sig) {
         result.skipped = true;
         result.ok = true;
@@ -147,7 +160,7 @@ async function syncMember(member, playerInfo) {
     // cache would make every target role look "missing" and assign nothing.
     if (guild.roles.cache.size <= 1) await guild.roles.fetch().catch(() => {});
 
-    const targetRoleNames = [targets.classRole, targets.subRole, targets.levelRole, targets.sectionRole].filter(Boolean);
+    const targetRoleNames = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole].filter(Boolean);
     const targetRoles = [];
     for (const name of targetRoleNames) {
         const role = findGuildRole(guild, name);
@@ -164,6 +177,8 @@ async function syncMember(member, playerInfo) {
     const finalRoleIds = new Set();
     member.roles.cache.forEach((r) => {
         if (r.id === guild.id) return; // @everyone is implicit, never in the role list
+        // Section ID locked: keep whatever Section ID role the member currently has.
+        if (sectionLocked && SECTION_ID_ROLE_SET.has(r.name.toLowerCase())) { finalRoleIds.add(r.id); return; }
         if (!isStrippableRole(r)) finalRoleIds.add(r.id);
     });
     targetRoles.forEach((r) => finalRoleIds.add(r.id));
@@ -191,10 +206,12 @@ async function syncMember(member, playerInfo) {
         }
     }
 
-    if ((config.role_sync || {}).nickname_level !== false && level > 0) {
+    if (!nicknameLocked && (config.role_sync || {}).nickname_level !== false && level > 0) {
         try {
-            const baseName = (member.nickname || member.user.username).replace(/\s*\[\d+\]\s*$/, '').trim();
-            const newNick = `${baseName} [${level}]`.substring(0, 32);
+            // Strip an existing trailing level suffix in either the old "[125]" or the
+            // current "LVL125" form, then re-append as "LVL125".
+            const baseName = (member.nickname || member.user.username).replace(/\s*(\[\d+\]|LVL\d+)\s*$/i, '').trim();
+            const newNick = `${baseName} LVL${level}`.substring(0, 32);
             if (member.nickname !== newNick) await member.setNickname(newNick, 'PSOBB level sync');
         } catch (e) {
             result.nickError = e.message;
@@ -233,6 +250,34 @@ function addToRoster(id) {
         fs.writeFileSync(ROSTER_PATH, JSON.stringify([...linkedRoster], null, 2));
         logInfo('ROLE-SYNC', `Added ${id} to linked roster (now ${linkedRoster.size}).`);
     } catch (e) { logError('ROLE-SYNC', `Roster save error: ${e.message}`); }
+}
+
+// Persisted per-user sync locks: { [discordId]: { secid?: true, nickname?: true } }.
+// A member can opt out of having their Section ID role and/or nickname overwritten
+// by the sync, via "!lock secid" / "!lock nickname".
+const LOCKS_PATH = path.join(MEMORY_DIR, 'role_sync_locks.json');
+function loadLocks() {
+    try {
+        if (fs.existsSync(LOCKS_PATH)) {
+            const obj = JSON.parse(fs.readFileSync(LOCKS_PATH, 'utf8'));
+            if (obj && typeof obj === 'object') return new Map(Object.entries(obj));
+        }
+    } catch (e) { logError('ROLE-SYNC', `Locks load error: ${e.message}`); }
+    return new Map();
+}
+let memberLocks = loadLocks();
+function getLocks(id) {
+    return memberLocks.get(String(id)) || {};
+}
+function setLock(id, kind, enabled) {
+    id = String(id);
+    const cur = { ...(memberLocks.get(id) || {}) };
+    if (enabled) cur[kind] = true; else delete cur[kind];
+    if (Object.keys(cur).length === 0) memberLocks.delete(id);
+    else memberLocks.set(id, cur);
+    try {
+        fs.writeFileSync(LOCKS_PATH, JSON.stringify(Object.fromEntries(memberLocks), null, 2));
+    } catch (e) { logError('ROLE-SYNC', `Locks save error: ${e.message}`); }
 }
 
 function getDiscordIdFromEntry(entry) {
@@ -340,6 +385,153 @@ async function handleSyncCommand(message) {
         logError('ROLE-SYNC', `!sync error for ${message.author.tag}: ${e.message}`);
         return await message.reply('📡 Sync failed due to interference. Try again shortly.');
     }
+}
+
+// Admin command: "!sync all" — force a full re-sync of every linked player the bot
+// knows about (the persisted roster) plus anyone currently online, online OR
+// offline. The periodic tick only touches online players; this is the manual
+// "make everyone correct right now" button. Admin-only because it walks the whole
+// roster and writes Discord roles for other members.
+async function handleSyncAllCommand(message) {
+    try {
+        logInfo('COMMAND', `!sync all by ${message.author.tag} (${message.author.id})`);
+        if (!message.guild) {
+            return await message.reply('⚠️ Run `!sync all` in the server (not DMs).');
+        }
+        if (!message.member || !message.member.permissions.has('Administrator')) {
+            return await message.reply('🔒 `!sync all` is for server admins only. Use `!sync` to sync just yourself.');
+        }
+
+        // Collect every Discord ID to sync. Primary source is the website's full
+        // list of linked accounts (get_linked_players) so this reaches everyone who
+        // linked on the site — even players who never ran !sync or were never seen
+        // online. Union in the persisted roster + online feed as a fallback in case
+        // that action isn't available on the deployed API yet.
+        const ids = new Set([...linkedRoster].map(String));
+        const linked = await apiCall('get_linked_players');
+        const linkedEntries = Array.isArray(linked) ? linked
+            : (linked && Array.isArray(linked.players) ? linked.players
+            : (linked && Array.isArray(linked.data) ? linked.data : []));
+        for (const entry of linkedEntries) {
+            const did = getDiscordIdFromEntry(entry);
+            if (did) ids.add(String(did));
+        }
+        const online = await apiCall('get_online_players');
+        const entries = Array.isArray(online) ? online
+            : (online && Array.isArray(online.players) ? online.players
+            : (online && Array.isArray(online.data) ? online.data : []));
+        for (const entry of entries) {
+            const did = getDiscordIdFromEntry(entry);
+            if (did) ids.add(String(did));
+        }
+
+        const total = ids.size;
+        if (total === 0) {
+            return await message.reply('ℹ️ No linked players are known yet. Players appear here after they run `!sync` once or are seen online.');
+        }
+
+        const status = await message.reply(`🔄 Syncing **${total}** linked player(s)… this can take a moment.`);
+
+        const stats = { synced: 0, unchanged: 0, notInGuild: 0, notLinked: 0, errors: 0, processed: 0 };
+        const missingRoles = new Set();
+        let i = 0;
+        for (const id of ids) {
+            i++;
+            try {
+                const info = await apiCall('get_player', { discord_id: id });
+                if (!isLinked(info)) { stats.notLinked++; continue; }
+                addToRoster(id);
+                const member = await message.guild.members.fetch(id).catch(() => null);
+                if (!member) { stats.notInGuild++; continue; }
+                lastSyncSignature.delete(member.id); // force a fresh apply
+                const res = await syncMember(member, info);
+                if (res.roleError) stats.errors++;
+                else if (res.skipped || !res.rolesChanged) stats.unchanged++;
+                else stats.synced++;
+                res.missing.forEach((m) => missingRoles.add(m));
+            } catch (e) {
+                stats.errors++;
+                logWarn('ROLE-SYNC', `!sync all: error for ${id}: ${e.message}`);
+            }
+            stats.processed++;
+            // Light progress feedback every 10 members without spamming edits.
+            if (i % 10 === 0) {
+                await status.edit(`🔄 Syncing linked players… ${i}/${total} (✅ ${stats.synced} · ➖ ${stats.unchanged})`).catch(() => {});
+            }
+            await delay(400); // rate-limit friendly, same pacing as the periodic tick
+        }
+
+        let summary = `✅ **Full sync complete** — processed ${stats.processed}/${total} linked player(s).\n`;
+        summary += `• Updated: **${stats.synced}**\n`;
+        summary += `• Already correct: **${stats.unchanged}**\n`;
+        if (stats.notInGuild) summary += `• Linked but not in this server: **${stats.notInGuild}**\n`;
+        if (stats.notLinked) summary += `• No longer linked (skipped): **${stats.notLinked}**\n`;
+        if (stats.errors) summary += `• Errors: **${stats.errors}** (see \`!log\`)\n`;
+        if (missingRoles.size) summary += `⚠️ Roles not found on this server (ask an admin to create them): ${[...missingRoles].join(', ')}`;
+        logInfo('ROLE-SYNC', `!sync all by ${message.author.tag}: updated ${stats.synced}, unchanged ${stats.unchanged}, notInGuild ${stats.notInGuild}, notLinked ${stats.notLinked}, errors ${stats.errors}.`);
+        return await status.edit(summary).catch(() => message.reply(summary));
+    } catch (e) {
+        logError('ROLE-SYNC', `!sync all error for ${message.author.tag}: ${e.message}`);
+        return await message.reply('📡 Full sync failed due to interference. Try again shortly.');
+    }
+}
+
+// Everyone command: "!lock <secid|nickname>" / "!unlock <secid|nickname>" — opt out
+// of (or back into) the bot overwriting your Section ID role or nickname on a sync.
+async function handleLockCommand(message) {
+    try {
+        const parts = message.content.trim().split(/\s+/);
+        const cmd = parts[0].toLowerCase();            // "!lock" or "!unlock"
+        const lock = cmd === '!lock';
+        const what = (parts[1] || '').toLowerCase();
+        logInfo('COMMAND', `${cmd} ${what} by ${message.author.tag} (${message.author.id})`);
+
+        const kindMap = {
+            secid: 'secid', sectionid: 'secid', section: 'secid', sec: 'secid', id: 'secid',
+            nick: 'nickname', nickname: 'nickname', name: 'nickname', nic: 'nickname',
+        };
+        const kind = kindMap[what];
+        if (!kind) {
+            const cur = getLocks(message.author.id);
+            const status = `Section ID: ${cur.secid ? '🔒 locked' : '🔓 unlocked'} · Nickname: ${cur.nickname ? '🔒 locked' : '🔓 unlocked'}`;
+            return await message.reply(
+                `Usage: \`!lock secid\`, \`!lock nickname\`, \`!unlock secid\`, \`!unlock nickname\`.\n` +
+                `🔒 **Lock** stops me from changing that on a sync; 🔓 **unlock** lets sync manage it again.\n` +
+                `Your current settings — ${status}`
+            );
+        }
+
+        setLock(message.author.id, kind, lock);
+        lastSyncSignature.delete(String(message.author.id)); // force re-eval with the new lock state
+        const label = kind === 'secid' ? 'Section ID role' : 'nickname';
+        if (lock) {
+            return await message.reply(`🔒 Locked your **${label}** — I won't change it on future syncs. Use \`!unlock ${what}\` to undo.`);
+        }
+        return await message.reply(`🔓 Unlocked your **${label}** — sync will manage it again from now on. Run \`!sync\` to update it now.`);
+    } catch (e) {
+        logError('ROLE-SYNC', `!lock error for ${message.author.tag}: ${e.message}`);
+        return await message.reply('📡 Could not update your lock settings. Try again shortly.');
+    }
+}
+
+// Everyone command: "!commands" — list the player-facing commands. Admin commands
+// (!sync all, !roles, !channels, !log, !restart) are intentionally omitted. Note:
+// "!help" is deliberately NOT handled here — it's reserved for the website.
+async function handleHelpCommand(message) {
+    logInfo('COMMAND', `!commands by ${message.author.tag} (${message.author.id})`);
+    const lines = [
+        '**`!sync`** — Update your Discord roles & nickname from your linked PSOBB character (class, level, Section ID).',
+        '**`!lock secid`** — Stop me changing your **Section ID** role on syncs. `!unlock secid` allows it again.',
+        '**`!lock nickname`** — Stop me changing your **nickname** on syncs. `!unlock nickname` allows it again.',
+        '**`!lock`** — Show your current lock settings.',
+        '**`!commands`** — Show this message.',
+    ];
+    const reply =
+        `🛰️ **PSOBB Bot — Player Commands**\n` +
+        lines.map((l) => `• ${l}`).join('\n') +
+        `\n\nℹ️ Not linked yet? Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run \`!sync\`.` +
+        `\n💬 You can also **@mention me** or DM me to ask about your characters, stats, missions, or item drop rates.`;
+    return await message.reply(reply);
 }
 
 // =====================================================================
@@ -587,6 +779,9 @@ async function handleChannelsCommand(message) {
 module.exports = {
     startRoleSync,
     handleSyncCommand,
+    handleSyncAllCommand,
+    handleLockCommand,
+    handleHelpCommand,
     handleRolesCommand,
     handleChannelsCommand,
     auditGuildRoles,
