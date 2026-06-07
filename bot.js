@@ -4,6 +4,7 @@ const { Events } = require('discord.js');
 const { config } = require('./src/config');
 const { client } = require('./src/discordClient');
 const { startRoleSync, selfCheck } = require('./src/roleSync');
+const { startLfgWatcher } = require('./src/lfg');
 const { registerMessageHandlers } = require('./src/messageHandler');
 const { logInfo, logWarn, logError } = require('./src/actionLog');
 const { announceStartup } = require('./src/system');
@@ -43,6 +44,15 @@ client.once(Events.ClientReady, async (c) => {
         }
     } catch (e) {
         logError('ROLE-SYNC', `Startup error: ${e.message}`);
+    }
+
+    // LFG announcer — polls the website for new Looking-For-Group posts and
+    // mirrors them into the dispatch channel. Independent of role sync so a
+    // role-sync failure can't take it down (and vice versa).
+    try {
+        await startLfgWatcher();
+    } catch (e) {
+        logError('LFG', `Startup error: ${e.message}`);
     }
 });
 
