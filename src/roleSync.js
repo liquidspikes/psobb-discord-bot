@@ -892,7 +892,7 @@ async function handleHelpCommand(message) {
             `__Support tooling__\n` + supportLines.map((l) => `• ${l}`).join('\n') +
             `\n\n__Admin-only__\n` + adminOnlyLines.map((l) => `• ${l}`).join('\n');
         try {
-            await message.author.send(adminMsg);
+            for (const c of splitForDm(adminMsg)) await message.author.send(c);
             reply += `\n\n🔐 I also DMed you the **admin commands**.`;
         } catch (e) {
             logWarn('ROLE-SYNC', `${invoked} admin DM failed for ${message.author.tag}: ${e.message}`);
@@ -904,7 +904,7 @@ async function handleHelpCommand(message) {
             `You can run these support commands (destructive/admin actions are restricted):\n` +
             supportLines.map((l) => `• ${l}`).join('\n');
         try {
-            await message.author.send(supportMsg);
+            for (const c of splitForDm(supportMsg)) await message.author.send(c);
             reply += `\n\n🛠️ I also DMed you the **Community Support commands**.`;
         } catch (e) {
             logWarn('ROLE-SYNC', `${invoked} support DM failed for ${message.author.tag}: ${e.message}`);
@@ -1015,10 +1015,9 @@ function formatRoleAudit(audit) {
     return out;
 }
 
-// Shared: DM a long report to the requesting admin, split on line boundaries so it
-// stays under Discord's 2000-char limit and never breaks a line mid-word. Returns
-// true on success; on failure it notifies the user in-channel and returns false.
-async function dmAdminReport(message, fullText, commandName) {
+// Split a long body on line boundaries into <2000-char chunks (Discord's per-message
+// cap) without breaking a line mid-word. A single over-long line is hard-split.
+function splitForDm(fullText) {
     const chunks = [];
     let cur = '';
     for (const line of fullText.split('\n')) {
@@ -1031,9 +1030,15 @@ async function dmAdminReport(message, fullText, commandName) {
         cur += (cur ? '\n' : '') + line;
     }
     if (cur) chunks.push(cur);
+    return chunks;
+}
 
+// Shared: DM a long report to the requesting admin, split so it stays under Discord's
+// 2000-char limit. Returns true on success; on failure it notifies the user in-channel
+// and returns false.
+async function dmAdminReport(message, fullText, commandName) {
     try {
-        for (const c of chunks) await message.author.send(c);
+        for (const c of splitForDm(fullText)) await message.author.send(c);
         return true;
     } catch (dmErr) {
         logWarn('AUDIT', `${commandName} DM failed for ${message.author.tag}: ${dmErr.message}`);
