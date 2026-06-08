@@ -13,11 +13,20 @@ const { logInfo, logError } = require('./actionLog');
 
 const INTERACTIONS_PATH = path.join(MEMORY_DIR, 'interactions.json');
 
+const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
 function load() {
     try {
         if (fs.existsSync(INTERACTIONS_PATH)) {
             const obj = JSON.parse(fs.readFileSync(INTERACTIONS_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') return new Map(Object.entries(obj).map(([k, v]) => [k, !!v]));
+            if (obj && typeof obj === 'object') {
+                return new Map(Object.entries(obj).map(([k, v]) => {
+                    if (typeof v === 'number') return [k, v];
+                    // Backwards compatibility for existing boolean flags
+                    return [k, v === true ? Date.now() : 0];
+                }));
+            }
         }
     } catch (e) { logError('INTERACT', `Load error: ${e.message}`); }
     return new Map();
@@ -29,34 +38,54 @@ function save() {
     } catch (e) { logError('INTERACT', `Save error: ${e.message}`); }
 }
 
-function hasInteracted(id) { return log.get(String(id)) === true; }
-function isKnown(id) { return log.has(String(id)); }
+function hasInteracted(id) {
+    const val = log.get(String(id));
+    if (!val) return false;
+    // Check if within 2 weeks
+    return (Date.now() - val) <= TWO_WEEKS_MS;
+}
 
-// Flip a user to "interacted" on their first message/reaction. Only writes on a
-// real state change, so steady-state activity costs nothing.
+function isKnown(id) {
+    return log.has(String(id));
+}
+
+// Flip a user to "interacted" on their first message/reaction, or refresh their timestamp.
+// Throttle writes: only save to disk if state shifts (lurker -> active) or if the
+// last timestamp update is older than 1 hour, preventing disk thrashing.
 function markInteracted(id) {
     id = String(id);
-    if (log.get(id) === true) return;
-    log.set(id, true);
+    const now = Date.now();
+    const prev = log.get(id);
+
+    // If they already interacted and their timestamp is less than an hour old, skip writing
+    if (typeof prev === 'number' && prev > 0) {
+        const wasActive = (now - prev) <= TWO_WEEKS_MS;
+        if (wasActive && (now - prev) < ONE_HOUR_MS) {
+            return;
+        }
+    }
+
+    log.set(id, now);
     save();
 }
 
 // Admin "build the first log": ensure every current member has an entry. New
-// members default to false (lurker) so the census is complete; existing values
-// (especially true) are preserved. Returns { added, total, interacted }.
+// members default to 0 (never interacted) so the census is complete; existing values
+// are preserved. Returns { added, total, interacted }.
 function buildLog(memberIds) {
     let added = 0;
     for (const id of memberIds) {
         const s = String(id);
-        if (!log.has(s)) { log.set(s, false); added++; }
+        if (!log.has(s)) { log.set(s, 0); added++; }
     }
     if (added) save();
-    return { added, total: log.size, interacted: [...log.values()].filter(Boolean).length };
+    const activeCount = [...log.keys()].filter(hasInteracted).length;
+    return { added, total: log.size, interacted: activeCount };
 }
 
 function stats() {
-    const interacted = [...log.values()].filter(Boolean).length;
-    return { total: log.size, interacted, lurkers: log.size - interacted };
+    const activeCount = [...log.keys()].filter(hasInteracted).length;
+    return { total: log.size, interacted: activeCount, lurkers: log.size - activeCount };
 }
 
 // Admin command: "!interactions [build|check @user]" — manage/inspect the log.
@@ -78,8 +107,8 @@ async function handleInteractionsCommand(message) {
             const res = buildLog(ids);
             logInfo('INTERACT', `Log built by ${message.author.tag}: ${res.total} tracked, ${res.interacted} interacted, ${res.added} new.`);
             return await message.reply(
-                `🗒️ **Interaction log built.** Tracking **${res.total}** users — ✅ **${res.interacted}** have interacted, 👀 **${res.total - res.interacted}** haven't (added **${res.added}** new entries).\n` +
-                `Linked members who haven't interacted show the 👀 badge until their first message/reaction.`
+                `🗒️ **Interaction log built.** Tracking **${res.total}** users — ✅ **${res.interacted}** are active, 👀 **${res.total - res.interacted}** are lurkers (added **${res.added}** new entries).\n` +
+                `Linked members who haven't interacted within 2 weeks show the 👀 badge until their next message/reaction.`
             );
         }
 
@@ -87,13 +116,26 @@ async function handleInteractionsCommand(message) {
             const target = message.mentions.users.first();
             if (!target) return await message.reply('⚠️ Usage: `!interactions check @user`.');
             const known = isKnown(target.id);
-            const state = hasInteracted(target.id) ? '✅ has interacted' : (known ? '👀 has NOT interacted yet' : 'ℹ️ not in the log yet (run `!interactions build`)');
+            const active = hasInteracted(target.id);
+            const val = log.get(target.id);
+            let state;
+            if (active) {
+                const daysLeft = ((TWO_WEEKS_MS - (Date.now() - val)) / (24 * 60 * 60 * 1000)).toFixed(1);
+                state = `✅ is active (last interaction recorded, expires in ${daysLeft} days)`;
+            } else if (known && val > 0) {
+                const ago = ((Date.now() - val) / (24 * 60 * 60 * 1000)).toFixed(1);
+                state = `👀 has NOT interacted for ${ago} days (marked as lurker)`;
+            } else if (known) {
+                state = `👀 has NEVER interacted (marked as lurker)`;
+            } else {
+                state = `ℹ️ not in the log yet (run \`!interactions build\`)`;
+            }
             return await message.reply(`<@${target.id}> — ${state}.`);
         }
 
         const s = stats();
         return await message.reply(
-            `🗒️ **Interaction log** — ${s.total} users tracked: ✅ ${s.interacted} interacted · 👀 ${s.lurkers} not yet.\n` +
+            `🗒️ **Interaction log** — ${s.total} users tracked: ✅ ${s.interacted} active · 👀 ${s.lurkers} lurkers.\n` +
             `Use \`!interactions build\` to (re)census all members, or \`!interactions check @user\`.`
         );
     } catch (e) {
