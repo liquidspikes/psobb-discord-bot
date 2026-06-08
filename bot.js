@@ -11,6 +11,7 @@ const { logInfo, logWarn, logError } = require('./src/actionLog');
 const { announceStartup } = require('./src/system');
 const { initDb } = require('./src/tekkerDb');
 const { trackActivity } = require('./src/tekkerChallenge');
+const { runStartupChecks, isFeatureUp } = require('./src/healthcheck');
 
 // Attach the raw DM relay + main message handler.
 registerMessageHandlers();
@@ -37,6 +38,18 @@ client.once(Events.ClientReady, async (c) => {
         logError('SYSTEM', `STARTUP SELF-CHECK FAILED — the running code looks stale or broken: ${e.message}`);
     }
 
+    // Dependency health check: probe every website/server endpoint the bot relies
+    // on. Any feature whose backend isn't deployed/reachable is disabled for this
+    // session (so the bot never runs through code that depends on a missing
+    // endpoint) — background features are skipped below, command/AI features tell
+    // the invoker. Result is folded into the admin startup DM.
+    let healthSummary = null;
+    try {
+        healthSummary = await runStartupChecks();
+    } catch (e) {
+        logError('SYSTEM', `Dependency health check failed: ${e.message}`);
+    }
+
     try {
         const cfg = config.role_sync || {};
         let guild = null;
@@ -47,18 +60,29 @@ client.once(Events.ClientReady, async (c) => {
         }
         if (!guild) guild = c.guilds.cache.first();
         if (guild) {
-            await startRoleSync(guild);
-            await announceStartup(guild, selfCheckResult);
+            // Role sync needs the player API (get_player / get_online_players).
+            if (isFeatureUp('role_sync')) {
+                await startRoleSync(guild);
+            } else {
+                logWarn('ROLE-SYNC', 'NOT started — the player API dependency is unavailable (see !health).');
+            }
+            await announceStartup(guild, selfCheckResult, healthSummary);
             // Party voice rooms — needs the resolved guild; isolated so a failure
-            // here can't take down role sync (and vice versa).
-            try {
-                await startPartyRooms(guild);
-            } catch (e) {
-                logError('PARTY', `Startup error: ${e.message}`);
+            // here can't take down role sync (and vice versa). Skipped entirely if
+            // the get_parties dependency is missing.
+            if (isFeatureUp('party_rooms')) {
+                try {
+                    await startPartyRooms(guild);
+                } catch (e) {
+                    logError('PARTY', `Startup error: ${e.message}`);
+                }
+            } else {
+                logWarn('PARTY', 'Party rooms NOT started — the get_parties dependency is unavailable (see !health).');
             }
 
-            // Start voice activity tracking loop for the tekker challenge
-            setInterval(async () => {
+            // Start voice activity tracking loop for the tekker challenge — only if
+            // the tekker store is reachable (otherwise every poll would just fail).
+            if (isFeatureUp('tekker')) setInterval(async () => {
                 try {
                     const channels = await guild.channels.fetch().catch(() => null);
                     if (!channels) return;
@@ -84,6 +108,7 @@ client.once(Events.ClientReady, async (c) => {
                     logError('SYSTEM', `Error in voice activity tracking loop: ${e.message}`);
                 }
             }, 60000); // Poll every 1 minute
+            else logWarn('TEKKER', 'Voice activity tracking NOT started — the tekker store is unavailable (see !health).');
         } else {
             logWarn('ROLE-SYNC', 'No guild found; role sync not started.');
         }
@@ -95,7 +120,11 @@ client.once(Events.ClientReady, async (c) => {
     // mirrors them into the dispatch channel. Independent of role sync so a
     // role-sync failure can't take it down (and vice versa).
     try {
-        await startLfgWatcher();
+        if (isFeatureUp('lfg')) {
+            await startLfgWatcher();
+        } else {
+            logWarn('LFG', 'LFG watcher NOT started — the get_lfg dependency is unavailable (see !health).');
+        }
     } catch (e) {
         logError('LFG', `Startup error: ${e.message}`);
     }

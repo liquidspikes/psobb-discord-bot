@@ -37,6 +37,10 @@ async function initDb() {
     else logError('TEKKER', 'Storage backend unreachable at startup (tekker_db ping failed).');
 }
 
+// Lightweight reachability probe used by the dependency health check. Returns
+// the raw ping result ({ ok: true }) or null on failure, without logging.
+const ping = () => call('ping');
+
 // Active drops
 const getActiveDrop = () => call('getActiveDrop');
 const createDrop = (drop) => call('createDrop', drop);
@@ -71,6 +75,7 @@ const setTokenClaimed = (tokenId, claimed, claimerId) => call('setTokenClaimed',
 
 module.exports = {
     initDb,
+    ping,
     getActiveDrop,
     createDrop,
     deactivateDrop,

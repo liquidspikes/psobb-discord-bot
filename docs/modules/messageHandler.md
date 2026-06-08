@@ -10,6 +10,7 @@
    - de-dupes via `handledMessages` Set, ignores bots/system messages;
    - `markInteracted` + `trackActivity(...,'message')` for non-command guild messages;
    - gate: only proceeds if DM, mentioned, a command (`!`/`/`), or in `channel_id`;
+   - **dependency gate:** `gateCommand(message)` ([healthcheck](healthcheck.md)) blocks commands whose website backend failed the startup check, replying with a notice; `!health` is routed here too;
    - **command routing** (order matters — see gotcha);
    - otherwise: build per-user history (isolated in public channels, last 12 turns), inject context (time, user id, social memory, online session), `model.startChat()`, run the **tool loop** (≤5 iterations), then chunk the reply under 2000 chars.
 
@@ -26,6 +27,6 @@
 
 ## Key behaviors / gotchas
 - ⚠️ **Known bug (open):** the `!quest`/`$quest` deprecation check uses `startsWith('!quest')`, which also matches **`!quests`** — so the documented `!quests` AI command is shadowed. Fix by anchoring (`/^!quest(\s|$)/`) or moving the `!quests` route earlier. See `CODE_REVIEW_REPORT.md` bug #1.
-- The tool loop calls [`tools`](tools.md) handlers and feeds results back; capped at 5 iterations to avoid loops.
+- The tool loop calls [`tools`](tools.md) handlers and feeds results back; capped at 5 iterations to avoid loops. Before each call it checks `isFeatureUp(featureForTool(name))` — a disabled tool returns `toolDownResult(name)` so the model tells the user the data source is down instead of hitting a missing endpoint.
 - Public-channel history is filtered to the requesting user (+ the bot's replies to them) to avoid leaking other users' context.
 - History is massaged to satisfy the Gemini API (must start with `user`, must alternate roles).

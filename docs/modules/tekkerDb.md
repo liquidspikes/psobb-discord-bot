@@ -8,6 +8,8 @@
 ## Exports (ops)
 `initDb` (ping) · `getActiveDrop` · `createDrop` · `deactivateDrop` · `getPlayerState` · `upsertPlayerState` · `addTelemetryLog` · `addActiveUser` · `getActiveUserCount` · `clearActiveUsers` · `getTriggerThreshold` · `setTriggerThreshold` · `createToken` · `getToken` · `getUnclaimedTokens` · `getAllTokens` · `transferToken` · `markTokenClaimed` · `deleteToken` · `setTokenClaimed`.
 
+Also exports **`ping()`** — a raw `ping` op (no logging) used by [`healthcheck`](healthcheck.md) to probe the tekker store at boot.
+
 ## Endpoint resolution
 `TEKKER_DB_URL` = `config.tekker_db_url` **or** `config.psobb_api_url` with `bot_api.php` → `bot_tekker_db.php`.
 

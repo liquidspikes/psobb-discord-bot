@@ -13,6 +13,7 @@ const { handleSyncCommand, handleSyncAllCommand, handleLockCommand, handleNickna
 const { handleLogCommand, logInfo, logWarn } = require('./actionLog');
 const { handleRestartCommand, handlePullCommand } = require('./system');
 const { handleClearCommand } = require('./moderation');
+const { gateCommand, isFeatureUp, featureForTool, toolDownResult, handleHealthCommand } = require('./healthcheck');
 
 const handledMessages = new Set();
 
@@ -67,6 +68,12 @@ function registerMessageHandlers() {
 
         if (!isDM && !isMentioned && !isCommand && !isConfigChannel) return;
         if (isCommand) {
+            // Block commands whose website backend failed the startup health check,
+            // replying to the invoker with a notice instead of running dead code.
+            if (await gateCommand(message)) return;
+            if (message.content.startsWith('!health')) {
+                return await handleHealthCommand(message);
+            }
             if (message.content.startsWith('/guess') || message.content.startsWith('!guess')) {
                 logInfo('COMMAND', `guess by ${message.author.tag} (${message.author.id})`);
                 const args = message.content.replace(/^[\/!]guess\s*/i, '').trim().split(/\s+/);
@@ -395,9 +402,19 @@ function registerMessageHandlers() {
                 const toolResults = [];
                 for (const call of response.functionCalls()) {
                     logInfo('TOOL', `${call.name}(${JSON.stringify(call.args)}) for ${message.author.tag}`);
-                    const handler = toolHandlers[call.name];
-                    const data = handler ? await handler(call.args) : { error: "Tool not found" };
-                    if (!handler) logWarn('TOOL', `Unknown tool requested: ${call.name}`);
+                    // If this tool's feature was disabled by the startup health check,
+                    // return an error the model relays to the user instead of calling
+                    // a handler that hits a missing/broken website endpoint.
+                    const gatedFeature = featureForTool(call.name);
+                    let data;
+                    if (gatedFeature && !isFeatureUp(gatedFeature)) {
+                        data = toolDownResult(call.name);
+                        logWarn('TOOL', `Skipped ${call.name} — feature "${gatedFeature}" disabled by failed health check.`);
+                    } else {
+                        const handler = toolHandlers[call.name];
+                        data = handler ? await handler(call.args) : { error: "Tool not found" };
+                        if (!handler) logWarn('TOOL', `Unknown tool requested: ${call.name}`);
+                    }
                     toolResults.push({
                         functionResponse: {
                             name: call.name,

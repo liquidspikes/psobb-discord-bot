@@ -46,6 +46,33 @@ and follow the links.
 - A persistent record (`interactions.json`) tracking if users have ever sent a message or added a reaction.
 - Displays a lurker badge (`👀`) for linked members who have never chatted or reacted on the server, or a active badge (`💠`) for those who have. Badges swap dynamically on their first activity.
 
+### Dependency health check & graceful degradation
+On startup the bot **probes every website/server endpoint it depends on** and disables any
+feature whose backend isn't reachable — so if the website hasn't been updated/deployed yet,
+the bot doesn't run through code that calls a missing endpoint. Implemented in
+[`src/healthcheck.js`](src/healthcheck.js).
+
+- **Background features** (role-sync tick, LFG watcher, party rooms, the voice-activity Tekker
+  trigger) are simply **not started** when their dependency is down.
+- **Command features** (`!sync`, `!nickname`, `/guess`, `!tekker`, `!tokens`, `!claim`, `!gift`)
+  reply to the invoker with a "temporarily unavailable" notice.
+- **AI tools** (`search_drops`, `get_server_stats`, `get_decryption_status`) return an error the
+  model relays to the user.
+- Every result is logged under the `HEALTH` category and folded into the **admin startup DM**.
+- Admins can re-probe at any time with **`!health`** — re-enabling a feature after the website is
+  fixed **without restarting** the bot.
+
+| Dependency | Gated feature |
+| --- | --- |
+| `bot_api.php` (`get_online_players`) | Role & nickname sync |
+| `get_lfg` | LFG announcer |
+| `get_parties` | Party voice rooms |
+| `bot_tekker_db.php` (`ping`) | Tekker Challenge |
+| `get_drops.php` | Drop search |
+| `api/summary` | Live server stats |
+| `api/agent_state.json` | Decryption status |
+| Mission Control vote dir (external script) | Server event voting |
+
 ### Live server tools (function calling)
 The model can call these tools against the server API / website:
 
@@ -92,6 +119,7 @@ The model can call these tools against the server API / website:
 - `!interactions` — Display stats for the interaction log.
 - `!interactions build` — Build/census the log, adding all current server members with `interacted: false`.
 - `!interactions check @User` — Inspect the interaction status of a specific user.
+- `!health` — Re-run the **website dependency health check** and DM/post a report of which dependencies are reachable and which features are consequently enabled/disabled. Use this after deploying website changes to re-enable a feature without restarting the bot.
 
 - `!clear <count>` (alias `!purge <count>`) — **bulk-deletes the last `<count>` messages** in the channel it's run in. The count is required and explicit (e.g. `!clear 50`); it's capped at 500 and, per Discord's rules, can only remove messages newer than 14 days. The bot needs **Manage Messages** in that channel. **Clears over 100 messages require a react-to-confirm** (✅ within 30s) from the admin who ran it. Every use is logged (who cleared how many, where), and a short self-deleting confirmation is posted.
 

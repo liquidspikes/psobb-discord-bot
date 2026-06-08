@@ -14,6 +14,7 @@ endpoints.** Start at [`bot.js`](modules/bot.md) (the entry point) and follow th
 | --- | --- | --- |
 | `bot.js` | [bot.md](modules/bot.md) | Entry point — wires Discord events and logs in. |
 | `src/config.js` | [config.md](modules/config.md) | Loads runtime config + shared filesystem paths. |
+| `src/healthcheck.js` | [healthcheck.md](modules/healthcheck.md) | Startup dependency probes + per-feature gating. |
 | `src/discordClient.js` | [discordClient.md](modules/discordClient.md) | The shared discord.js `Client` instance. |
 | `src/actionLog.js` | [actionLog.md](modules/actionLog.md) | Central action log (console + ring buffer + file) and `!log`. |
 | `src/api.js` | [api.md](modules/api.md) | PSOBB server API calls + 30-min drops cache. |
@@ -47,6 +48,7 @@ the bot repo.
 | `api/summary.php` | [summary.md](website-api/summary.md) | `tools.js` (`get_server_stats`) |
 | `api/agent_state.json` | [agent_state.md](website-api/agent_state.md) | `tools.js` (`get_decryption_status`) |
 | website pages (generic) | [website-pages.md](website-api/website-pages.md) | `tools.js` (`fetch_website_content`) |
+| Mission Control vote files (external script) | [votes.md](website-api/votes.md) | `tools.js` (`get_active_vote_status`, `get_recent_votes`) |
 
 ## Cross-cutting docs at repo root
 
@@ -54,5 +56,6 @@ the bot repo.
 - [`LOGGING_POLICY.md`](../LOGGING_POLICY.md) — what is/isn't logged.
 - [`COMMAND_LIST.md`](../COMMAND_LIST.md) — command reference.
 - [`TEKKER_CLAIM_INTEGRATION.md`](../TEKKER_CLAIM_INTEGRATION.md) — the not-yet-live claim seam.
+- [`VOTING_SYSTEM.md`](../VOTING_SYSTEM.md) — current vote setup + proposed better fix (see also [website-api/votes.md](website-api/votes.md)).
 - [`CODE_REVIEW_REPORT.md`](../CODE_REVIEW_REPORT.md) — known bugs & risks (some still open).
 - [`SITE_SQLITE3_USAGE.md`](../SITE_SQLITE3_USAGE.md) — website DB-layer map.

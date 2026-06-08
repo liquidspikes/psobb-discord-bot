@@ -6,6 +6,12 @@ const { client } = require('./discordClient');
 const { apiCall, getDropsData } = require('./api');
 const { loadSocialMemory, saveSocialMemory } = require('./socialMemory');
 
+// Base directory the external Mission Control vote generator writes its state to
+// (current_vote.json + the *.applied snapshots). This is exactly where the bot is
+// currently set up to read the voting system from — kept as a single constant so
+// the vote tools below and the startup health check both point at the same place.
+const VOTE_SCRIPTS_DIR = '/home/alexzimmerman/gemini-psobb-scripts';
+
 // Tool Definitions
 const tools = [
     {
@@ -127,7 +133,7 @@ const toolHandlers = {
     },
     get_active_vote_status: async () => {
         try {
-            const voteFile = '/home/alexzimmerman/gemini-psobb-scripts/current_vote.json';
+            const voteFile = VOTE_SCRIPTS_DIR + '/current_vote.json';
             if (!fs.existsSync(voteFile)) return { error: "No active vote found." };
 
             const voteData = JSON.parse(fs.readFileSync(voteFile, 'utf8'));
@@ -159,7 +165,7 @@ const toolHandlers = {
             const results = {};
 
             // 1. Fetch current active vote (if exists)
-            const voteFile = '/home/alexzimmerman/gemini-psobb-scripts/current_vote.json';
+            const voteFile = VOTE_SCRIPTS_DIR + '/current_vote.json';
             if (fs.existsSync(voteFile)) {
                 try {
                     const voteData = JSON.parse(fs.readFileSync(voteFile, 'utf8'));
@@ -187,8 +193,8 @@ const toolHandlers = {
             }
 
             // 2. Fetch previously completed / applied vote
-            const appliedVoteFile = '/home/alexzimmerman/gemini-psobb-scripts/current_vote.json.applied';
-            const appliedEventFile = '/home/alexzimmerman/gemini-psobb-scripts/pending_event.json.applied';
+            const appliedVoteFile = VOTE_SCRIPTS_DIR + '/current_vote.json.applied';
+            const appliedEventFile = VOTE_SCRIPTS_DIR + '/pending_event.json.applied';
 
             if (fs.existsSync(appliedVoteFile) && fs.existsSync(appliedEventFile)) {
                 try {
@@ -347,4 +353,4 @@ const toolHandlers = {
     }
 };
 
-module.exports = { tools, toolHandlers };
+module.exports = { tools, toolHandlers, VOTE_SCRIPTS_DIR };

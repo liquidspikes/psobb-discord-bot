@@ -12,7 +12,7 @@
 | --- | --- |
 | `handleRestartCommand(message)` | `!restart` (admin). |
 | `handlePullCommand(message)` | `!pull` / `!update` / `!gitpull` (admin). |
-| `announceStartup(guild, selfCheckResult?)` | Boot DM to admins. |
+| `announceStartup(guild, selfCheckResult?, healthSummary?)` | Boot DM to admins (incl. the [dependency health](healthcheck.md) summary). |
 
 ## Depends on
 [`discordClient`](discordClient.md), [`actionLog`](actionLog.md), `child_process.exec`.

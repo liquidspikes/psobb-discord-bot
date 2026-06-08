@@ -40,7 +40,7 @@ async function handleRestartCommand(message) {
 // Called once on boot/reboot: DM every server admin (members with the Administrator
 // permission, excluding bots) that the bot has started, with a timestamp. Fires once
 // per process, so a `!restart` or crash-relaunch produces exactly one notice.
-async function announceStartup(guild, selfCheckResult = null) {
+async function announceStartup(guild, selfCheckResult = null, healthSummary = null) {
     const startedAt = new Date();
     try {
         await guild.members.fetch(); // populate the member cache so we can find admins
@@ -53,6 +53,11 @@ async function announceStartup(guild, selfCheckResult = null) {
         // to miss: a passing run reads as a 🩺 line, a failure leads with 🚨.
         if (selfCheckResult) {
             notice += `\n${selfCheckResult.startsWith('🚨') ? selfCheckResult : `🩺 ${selfCheckResult}`}`;
+        }
+        // Append the website dependency health summary (which features, if any,
+        // were disabled because their backend endpoint wasn't reachable).
+        if (healthSummary) {
+            notice += `\n${healthSummary}`;
         }
         let delivered = 0;
         for (const member of admins.values()) {

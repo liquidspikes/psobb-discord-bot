@@ -6,10 +6,11 @@
 - Register message handlers, then on `ClientReady`:
   1. `initDb()` — connectivity check to the Tekker storage endpoint.
   2. `selfCheck()` — boot integrity gate for the role-sync hot path; result is logged and DMed to admins.
-  3. Resolve the target guild (from `role_sync.guild_id` → `channel_id`'s guild → first guild).
-  4. `startRoleSync(guild)`, `announceStartup(guild, selfCheckResult)`, `startPartyRooms(guild)`.
-  5. Start the **voice-activity tracking loop** (`setInterval`, 60s): scans guild voice channels and feeds active, non-bot, non-muted members in multi-person channels to `trackActivity(..., 'voice')`.
-  6. `startLfgWatcher()`.
+  3. `runStartupChecks()` — [dependency health check](healthcheck.md); the summary is folded into the admin DM. Each feature start below is guarded by `isFeatureUp(...)`.
+  4. Resolve the target guild (from `role_sync.guild_id` → `channel_id`'s guild → first guild).
+  5. `startRoleSync(guild)` **if `isFeatureUp('role_sync')`**, `announceStartup(guild, selfCheckResult, healthSummary)`, `startPartyRooms(guild)` **if `isFeatureUp('party_rooms')`**.
+  6. Start the **voice-activity tracking loop** (`setInterval`, 60s) **if `isFeatureUp('tekker')`**: scans guild voice channels and feeds active, non-bot, non-muted members in multi-person channels to `trackActivity(..., 'voice')`.
+  7. `startLfgWatcher()` **if `isFeatureUp('lfg')`**.
 - Each subsystem is wrapped in its own `try/catch` so one failing can't take down the others.
 
 ## Exports
@@ -25,6 +26,7 @@ None (executable entry point). `package.json` `main`/`start` → `node bot.js`.
 - [`actionLog`](actionLog.md) — `logInfo/logWarn/logError`.
 - [`system`](system.md) — `announceStartup`.
 - [`tekkerDb`](tekkerDb.md) — `initDb`; [`tekkerChallenge`](tekkerChallenge.md) — `trackActivity`.
+- [`healthcheck`](healthcheck.md) — `runStartupChecks`, `isFeatureUp`.
 
 ## Key behaviors / gotchas
 - The bot logs in at the very end with `client.login(config.bot_token)`; if config fails to load, [`config`](config.md) throws first.
