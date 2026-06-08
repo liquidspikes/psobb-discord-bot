@@ -9,10 +9,11 @@ const SUBCLASS_TO_MAIN = {
 };
 
 // PSOBB numeric class IDs (class2) -> canonical subclass name.
+// Verified against newserv StaticGameData.cc / api/bot_api.php $CLASS_MAP.
 const CLASS_ID_MAP = {
     0: 'HUmar', 1: 'HUnewearl', 2: 'HUcast', 3: 'RAmar', 4: 'RAcast',
-    5: 'RAmarl', 6: 'FOmarl', 7: 'FOnewm', 8: 'FOnewearl', 9: 'HUcaseal',
-    10: 'RAcaseal', 11: 'FOmar'
+    5: 'RAcaseal', 6: 'FOmarl', 7: 'FOnewm', 8: 'FOnewearl', 9: 'HUcaseal',
+    10: 'FOmar', 11: 'RAmarl'
 };
 
 const SECTION_ID_NAMES = ['Viridia', 'Greenill', 'Skyly', 'Bluefull', 'Purplenum', 'Pinkal', 'Redria', 'Oran', 'Yellowboze', 'Whitill'];
@@ -29,7 +30,10 @@ const MANAGED_ROLE_NAMES = new Set(
 
 function normalizeSectionId(sectionId) {
     if (sectionId && typeof sectionId === 'string') {
-        const norm = sectionId.charAt(0).toUpperCase() + sectionId.slice(1).toLowerCase();
+        let norm = sectionId.charAt(0).toUpperCase() + sectionId.slice(1).toLowerCase();
+        // newserv spells this Section ID with a double-n; the rest of the site
+        // (and the Discord role) uses the single-n form. Accept both.
+        if (norm === 'Greennill') norm = 'Greenill';
         return SECTION_ID_NAMES.includes(norm) ? norm : null;
     }
     if (sectionId !== null && sectionId !== undefined) {

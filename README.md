@@ -8,6 +8,20 @@ in-game identity into Discord roles and nicknames.
 
 Entry point is [`bot.js`](bot.js); the implementation is split into focused modules under [`src/`](src/).
 
+## 📚 Documentation map (per-file docs)
+
+Every module and every website dependency has its own reference doc under [`docs/`](docs/),
+written so an AI agent (or human) can navigate and change the code without reading every
+source file first. Each doc lists the module's **responsibility, exports, what it depends on,
+what depends on it, data files, config keys, and gotchas** — start at [`docs/README.md`](docs/README.md)
+and follow the links.
+
+- **Start here:** [`docs/README.md`](docs/README.md) — the documentation index.
+- **Bot modules:** one doc per file in [`docs/modules/`](docs/modules/) (e.g. [`roleSync.md`](docs/modules/roleSync.md), [`messageHandler.md`](docs/modules/messageHandler.md), [`tekkerChallenge.md`](docs/modules/tekkerChallenge.md)).
+- **Website dependencies the bot consumes:** [`docs/website-api/`](docs/website-api/) — the contracts for `bot_api.php`, `bot_tekker_db.php`, `get_drops.php`, `summary.php`, `agent_state.json`, and generic page fetches (these `.php`/`.json` files live in the separate `psobb.io-website-public` repo; edit them there).
+
+> Keep these docs in sync when you change a module's exports, data files, or config keys.
+
 ---
 
 ## Features
