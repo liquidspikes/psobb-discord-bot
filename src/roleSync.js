@@ -11,7 +11,7 @@ const { ChannelType } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
-const { hasInteracted, scanGuildHistory } = require('./interactions');
+const { lurkerTier } = require('./interactions');
 const { canSupport, memberTier, resolveMember } = require('./permissions');
 const {
     SUBCLASS_TO_MAIN,
@@ -170,9 +170,23 @@ const LURKER_EXEMPT_ROLES = new Set(
     (((config.role_sync || {}).lurker_exempt_roles) || ['Community Support']).map((r) => String(r).toLowerCase())
 );
 
+// Lurker escalation tiers prefixed ONTO the eyes (never stacked onto a diamond):
+//   👀     base lurker (14–45 days idle)
+//   ⚠️👀   U+26A0 — idle 45+ days
+//   ❗👀   U+2757 — never interacted at all (only after a full-history deep scan)
+// These are composite badges (warning/bang immediately before the eyes); the tier is
+// decided by interactions.lurkerTier() during the !interactions build lurker pass.
+const WARN_PREFIX = '⚠️';                                  // ⚠️ U+26A0 (+VS16)
+const BANG_PREFIX = '❗';                                       // ❗ U+2757
+const WARN_EYES = EYES_PREFIX ? WARN_PREFIX + EYES_PREFIX : '';     // ⚠️👀
+const BANG_EYES = EYES_PREFIX ? BANG_PREFIX + EYES_PREFIX : '';     // ❗👀
+
 // All prefixes the bot manages, so a nickname rebuild strips whichever is present
-// (and swaps 👀 ↔ 💠 cleanly) without ever stacking.
-const MANAGED_PREFIXES = [NICK_PREFIX, EYES_PREFIX].filter(Boolean);
+// (and swaps between lurker tiers / 💠 cleanly) without ever stacking. Composite
+// lurker badges are listed before the bare 👀 so the longest match is stripped first.
+const MANAGED_PREFIXES = [NICK_PREFIX, BANG_EYES, WARN_EYES, EYES_PREFIX].filter(Boolean);
+// The lurker-only subset (excludes 💠) — used to detect/clear a stale lurker badge.
+const MANAGED_LURKER_PREFIXES = [BANG_EYES, WARN_EYES, EYES_PREFIX].filter(Boolean);
 function stripManagedPrefix(s) {
     for (const p of MANAGED_PREFIXES) {
         if (p && s.startsWith(p)) return s.slice(p.length).trimStart();
@@ -293,10 +307,14 @@ async function syncMember(member, playerInfo) {
         }
     }
 
-    // Nickname update — only on a clean role sync (a "successful" sync). Always keep
-    // a badge on a linked member (💠 interacted / 👀 lurker), independent of the
-    // nickname lock; the "LVL<level>" suffix is maintained only when not locked.
-    if (!result.roleError) {
+    // Nickname update. A LINKED member ALWAYS gets the 💠 badge, which (via
+    // buildManagedNick → stripManagedPrefix) overwrites any stale lurker eyes
+    // (👀/⚠️👀/❗👀) — becoming linked must always win over an interaction badge. This
+    // runs independent of the nickname lock AND independent of role-assignment success:
+    // a role error (e.g. a target role above the bot) must not leave a linked member
+    // wearing eyes. setNickname has its own try/catch, so a missing-perms case is
+    // harmless. The "LVL<level>" suffix is still maintained only when not locked.
+    {
         try {
             const newNick = buildManagedNick(member.nickname || member.user.username, level, nicknameLocked, badge);
             if (member.nickname !== newNick) await member.setNickname(newNick, 'PSOBB sync');
@@ -329,27 +347,34 @@ function isLurkerExempt(member) {
     );
 }
 
-// Apply (or clear) the 👀 lurker badge on an UNLINKED member. Eyes go to unlinked
-// members who have NOT interacted within the active window and are not exempt
-// (admins / Community Support / anyone already wearing 💠). A member who has since
-// interacted — or become exempt — has any stale eyes badge stripped. This is the
-// unlinked counterpart to syncMember (which handles linked members + the 💠 diamond).
-// Returns { changed, action: 'eyes' | 'cleared' | 'none', error }.
+// Apply (or clear) the tiered lurker badge on an UNLINKED member. The tier comes from
+// interactions.lurkerTier(), which reads the back-filled message history + live
+// reaction/message tracking:
+//   active → no badge   ·   eyes → 👀 (14–45d idle)
+//   warn   → ⚠️👀 (45d+ idle)   ·   never → ❗👀 (never interacted; needs a deep scan)
+// Eyes never land on exempt members (admins / Community Support / anyone wearing 💠);
+// a member who has since interacted — or become exempt — has any stale badge stripped.
+// This is the unlinked counterpart to syncMember (which handles linked members + 💠).
+// Returns { changed, action: 'eyes' | 'warn' | 'never' | 'cleared' | 'none', error }.
 async function applyLurkerBadge(member) {
     const result = { changed: false, action: 'none', error: null };
     if (!member || (member.user && member.user.bot) || !EYES_PREFIX) return result;
 
     const current = member.nickname || '';
-    const hasEyes = current.startsWith(EYES_PREFIX);
-    // Lurker = unlinked (caller only passes unlinked members) + not exempt + no real
-    // interaction recorded in the active window.
-    const lurker = !isLurkerExempt(member) && !hasInteracted(member.id);
+    const hasLurkerBadge = MANAGED_LURKER_PREFIXES.some((p) => current.startsWith(p));
+
+    // Tier the member unless they're exempt (caller only passes unlinked members).
+    const tier = isLurkerExempt(member) ? 'active' : lurkerTier(member.id);
+    const prefix = tier === 'eyes' ? EYES_PREFIX
+        : tier === 'warn' ? WARN_EYES
+        : tier === 'never' ? BANG_EYES
+        : null; // 'active' (or exempt) → no badge
 
     let desired;
-    if (lurker) {
-        desired = buildManagedNick(current || member.user.username, 0, true, EYES_PREFIX);
-    } else if (hasEyes) {
-        // No longer a lurker (interacted, or now exempt) — strip the eyes badge.
+    if (prefix) {
+        desired = buildManagedNick(current || member.user.username, 0, true, prefix);
+    } else if (hasLurkerBadge) {
+        // No longer a lurker (interacted, or now exempt) — strip the stale badge.
         desired = stripManagedPrefix(current || member.user.username).substring(0, 32);
     } else {
         return result; // not a lurker, no stale badge → nothing to do
@@ -359,12 +384,41 @@ async function applyLurkerBadge(member) {
     try {
         await member.setNickname(desired, 'PSOBB lurker badge');
         result.changed = true;
-        result.action = lurker ? 'eyes' : 'cleared';
+        result.action = prefix ? tier : 'cleared';
     } catch (e) {
         result.error = e.message;
         logWarn('ROLE-SYNC', `Could not set lurker nickname for ${member.user.tag}: ${e.message}`);
     }
     return result;
+}
+
+// Walk every member and apply the tiered eyes badge to genuine UNLINKED lurkers. This
+// is the whole lurker-badge surface, owned by the !interactions command (NOT !sync) —
+// the two are intentionally separated: !sync deals only with linked website players
+// (roles + 💠); the interaction log + eyes badges live entirely under !interactions.
+// Linked members are skipped via the persisted roster, and applyLurkerBadge's own
+// isLurkerExempt() skips anyone wearing 💠 / admins / Community Support as a backstop.
+// `onProgress(stats)` is invoked periodically so the caller can update a status reply.
+// Returns { eyes, warn, never, cleared, skipped, errors, checked }.
+async function runLurkerPass(guild, onProgress) {
+    const stats = { eyes: 0, warn: 0, never: 0, cleared: 0, skipped: 0, errors: 0, checked: 0 };
+    const members = [...guild.members.cache.values()];
+    let written = 0;
+    for (const member of members) {
+        if (!member || (member.user && member.user.bot)) continue;
+        if (linkedRoster.has(String(member.id))) continue; // linked → !sync's job (gets 💠)
+        stats.checked++;
+        const r = await applyLurkerBadge(member);
+        if (r.error) stats.errors++;
+        else if (r.action === 'eyes') stats.eyes++;
+        else if (r.action === 'warn') stats.warn++;
+        else if (r.action === 'never') stats.never++;
+        else if (r.action === 'cleared') stats.cleared++;
+        else stats.skipped++;
+        if (r.changed) { written++; await delay(400); } // only pace when we actually wrote
+        if (written > 0 && written % 25 === 0 && onProgress) await onProgress(stats);
+    }
+    return stats;
 }
 
 // Persisted roster of Discord IDs known to be linked (fallback for the online poll
@@ -576,11 +630,12 @@ async function handleSyncCommand(message) {
     }
 }
 
-// Admin command: "!sync all" — force a full re-sync of every linked player the bot
-// knows about (the persisted roster) plus anyone currently online, online OR
-// offline. The periodic tick only touches online players; this is the manual
-// "make everyone correct right now" button. Admin-only because it walks the whole
-// roster and writes Discord roles for other members.
+// Admin command: "!sync all" — force a full re-sync of every LINKED website player the
+// bot knows about (the persisted roster ∪ get_linked_players ∪ anyone online), online
+// or offline. This command is deliberately scoped to linked players ONLY (roles + 💠);
+// it does NOT scan history or touch the interaction log / lurker badges — that lives
+// entirely under `!interactions` (see runLurkerPass). The periodic tick only touches
+// online players; this is the manual "make every linked player correct right now" button.
 async function handleSyncAllCommand(message) {
     try {
         logInfo('COMMAND', `!sync all by ${message.author.tag} (${message.author.id})`);
@@ -591,13 +646,8 @@ async function handleSyncAllCommand(message) {
             return await message.reply('🔒 `!sync all` is for server admins and Community Support only. Use `!sync` to sync just yourself.');
         }
 
-        // Pull the full member list, then recurse the server's recent message history to
-        // record who has actually interacted. This MUST happen before the lurker pass so
-        // the 👀 eyes only land on members with no real activity — not on everyone just
-        // because the going-forward interaction log started out empty.
-        const status = await message.reply('🔎 Scanning server history to see who has actually interacted… this can take a moment.');
+        const status = await message.reply('🔄 Gathering linked players…');
         await message.guild.members.fetch().catch(() => {});
-        const scan = await scanGuildHistory(message.guild);
 
         // Collect every Discord ID to sync. Primary source is the website's full
         // list of linked accounts (get_linked_players) so this reaches everyone who
@@ -623,7 +673,7 @@ async function handleSyncAllCommand(message) {
         }
 
         const total = ids.size;
-        await status.edit(`🔄 Scanned ${scan.messagesScanned} messages. Syncing **${total}** linked player(s)…`).catch(() => {});
+        await status.edit(`🔄 Syncing **${total}** linked player(s)…`).catch(() => {});
 
         const stats = { synced: 0, unchanged: 0, notInGuild: 0, notLinked: 0, errors: 0, processed: 0 };
         const missingRoles = new Set();
@@ -654,42 +704,15 @@ async function handleSyncAllCommand(message) {
             await delay(400); // rate-limit friendly, same pacing as the periodic tick
         }
 
-        // Unlinked lurker pass: walk EVERY member and, for those who are NOT linked,
-        // apply the 👀 eyes badge when they have no recorded interaction (verified by the
-        // history scan above) and aren't exempt (admins / Community Support / anyone
-        // already wearing 💠). Members who have since spoken get a stale eyes badge
-        // stripped. Linked members are skipped here — they got their 💠 in the loop above.
-        const lurkerStats = { eyes: 0, cleared: 0, skipped: 0, errors: 0, checked: 0 };
-        const members = [...message.guild.members.cache.values()];
-        let j = 0;
-        for (const member of members) {
-            if (!member || (member.user && member.user.bot)) continue;
-            if (ids.has(String(member.id))) continue; // linked — already handled (got 💠)
-            lurkerStats.checked++;
-            const r = await applyLurkerBadge(member);
-            if (r.error) lurkerStats.errors++;
-            else if (r.action === 'eyes') lurkerStats.eyes++;
-            else if (r.action === 'cleared') lurkerStats.cleared++;
-            else lurkerStats.skipped++;
-            if (r.changed) { j++; await delay(400); } // only pace when we actually wrote
-            if (j > 0 && j % 25 === 0) {
-                await status.edit(`👀 Tagging unlinked lurkers… ${lurkerStats.checked} checked (👀 ${lurkerStats.eyes} new · ✨ ${lurkerStats.cleared} cleared)`).catch(() => {});
-            }
-        }
-
-        let summary = `✅ **Full sync complete** — processed ${stats.processed}/${total} linked player(s).\n`;
+        let summary = `✅ **Linked player sync complete** — processed ${stats.processed}/${total} linked player(s).\n`;
         summary += `• Updated: **${stats.synced}**\n`;
         summary += `• Already correct: **${stats.unchanged}**\n`;
         if (stats.notInGuild) summary += `• Linked but not in this server: **${stats.notInGuild}**\n`;
         if (stats.notLinked) summary += `• No longer linked (skipped): **${stats.notLinked}**\n`;
         if (stats.errors) summary += `• Errors: **${stats.errors}** (see \`!log\`)\n`;
-        summary += `\n👀 **Unlinked lurker pass** — checked ${lurkerStats.checked} unlinked member(s):\n`;
-        summary += `• Tagged 👀: **${lurkerStats.eyes}**\n`;
-        if (lurkerStats.cleared) summary += `• Cleared (now active): **${lurkerStats.cleared}**\n`;
-        if (lurkerStats.errors) summary += `• Couldn't rename: **${lurkerStats.errors}** (often admins/owner — Discord blocks bot renames)\n`;
-        summary += `_(History scan read ${scan.messagesScanned} messages across ${scan.channelsScanned} channels.)_\n`;
+        summary += `_(Lurker 👀/⚠️/❗ badges are managed separately — run \`!interactions build\`.)_\n`;
         if (missingRoles.size) summary += `⚠️ Roles not found on this server (ask an admin to create them): ${[...missingRoles].join(', ')}`;
-        logInfo('ROLE-SYNC', `!sync all by ${message.author.tag}: linked updated ${stats.synced}/unchanged ${stats.unchanged}/notInGuild ${stats.notInGuild}/notLinked ${stats.notLinked}/errors ${stats.errors}; lurkers eyes ${lurkerStats.eyes}/cleared ${lurkerStats.cleared}/errors ${lurkerStats.errors} of ${lurkerStats.checked} checked.`);
+        logInfo('ROLE-SYNC', `!sync all by ${message.author.tag}: linked updated ${stats.synced}/unchanged ${stats.unchanged}/notInGuild ${stats.notInGuild}/notLinked ${stats.notLinked}/errors ${stats.errors}.`);
         return await status.edit(summary).catch(() => message.reply(summary));
     } catch (e) {
         logError('ROLE-SYNC', `!sync all error for ${message.author.tag}: ${e.message}`);
@@ -839,17 +862,17 @@ async function handleHelpCommand(message) {
     // Curated support set — read-only / support tooling. Community Support can RUN
     // every command listed here; the destructive surface is admin-only (below).
     const supportLines = [
-        '**`!sync all`** — Recurse the server\'s recent history, then re-sync every linked player (💠) and tag unlinked lurkers (👀).',
+        '**`!sync all`** — Re-sync every **linked website player** (roles + 💠), online or offline. Lurker 👀/⚠️/❗ badges are handled separately by `!interactions build`.',
         '**`!roles`** — DM you a full server **role** audit (present / missing / above the bot).',
         '**`!channels`** — DM you a full **channel permission** audit.',
         '**`!log`** — Show the recent bot action log.',
         '**`!health`** — Re-check website dependencies and report which features are enabled/disabled.',
-        '**`!interactions`** — Lurker/active log stats (👀 unlinked lurkers vs ✅ recently-active; linked members always wear 💠).',
-        '**`!interactions check @user`** — Show whether a specific member is active or a lurker.',
+        '**`!interactions`** — Lurker/active log stats (👀/⚠️/❗ unlinked lurkers vs ✅ recently-active; linked members always wear 💠).',
+        '**`!interactions check @user`** — Show a member\'s tier: ✅ active, 👀 (14–45d), ⚠️👀 (45d+), or ❗👀 (never).',
     ];
     // Admin-only surface — destructive actions + log-mutating / token-minting commands.
     const adminOnlyLines = [
-        '**`!interactions build`** — *(admin)* Recurse server history, then census all current members into the interaction log.',
+        '**`!interactions build`** — *(admin)* Recurse 45 days of history, census the interaction log, **and apply the 👀/⚠️ lurker badges** to unlinked members. Add **`deep`** to scan the full history and also flag ❗ (never interacted). This is the only command that writes lurker badges; `!sync all` handles linked players (💠).',
         '**`!clear`** (alias `!purge`) — *(admin)* Bulk-delete recent messages.',
         '**`!pull`** (aliases `!update`, `!gitpull`) — *(admin)* Git-pull the latest code and restart.',
         '**`!restart`** — *(admin)* Restart the bot process.',
@@ -1200,6 +1223,11 @@ function selfCheck() {
     throw new Error(`Role-sync self-check FAILED:\n - ${problems.join('\n - ')}`);
 }
 
+// Only symbols actually consumed by other modules are exported. The role/nickname
+// helpers (syncMember, selectProfile, computeTargetRoleNames, buildManagedNick,
+// isStrippableRole, isLinked, isLurkerExempt, applyLurkerBadge) and the audit builders
+// are used internally only — including by selfCheck(), which closes over them directly
+// rather than importing them — so they are intentionally NOT exported.
 module.exports = {
     startRoleSync,
     selfCheck,
@@ -1210,15 +1238,6 @@ module.exports = {
     handleHelpCommand,
     handleRolesCommand,
     handleChannelsCommand,
-    auditGuildRoles,
-    auditGuildChannels,
     dmAdminReport,
-    syncMember,
-    applyLurkerBadge,
-    isLurkerExempt,
-    selectProfile,
-    computeTargetRoleNames,
-    buildManagedNick,
-    isStrippableRole,
-    isLinked,
+    runLurkerPass,
 };

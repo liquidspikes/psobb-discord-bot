@@ -38,6 +38,7 @@ These events are actively written to the console and to the action log for audit
     *   Manual admin roll triggers.
     *   Token grants, revokes, ownership transfers, and claim status edits.
 *   **Example**: `[INFO] [TEKKER] Win: User#1234 solved stats 15/0/35/0/10 on attempt 3/5 → token T-ABCD23`
+*   **Storage failures (circuit-breakered)**: because the scanner calls the tekker store on every message, `tekker_db` connectivity errors are de-duplicated — logged **once** when the store first goes down, silent while it stays down, and one recovery line when it returns. This avoids one error per op per message. (Successful ops never log.)
 
 ### 5. Website API Failures & Diagnostic Warnings (`API` / `API-ERROR`)
 *   **Trigger**: Any HTTP connection failures, 500 server-side errors, or timeouts when calling the `psobb.io` API.
@@ -51,8 +52,8 @@ To protect the server disk space and keep log logs readable, the following event
 
 ### 1. Chat Message & Reaction Activity Triggers
 *   **Policy**: Silent by default.
-*   **Detail**: Every user message and reaction contribution flips their interaction state to `true` (removing the `👀` lurker badge) and rolls a random chance to spawn a puzzle. This background loop is silent.
-*   **Exception**: A log entry is only created if the activity trigger successfully succeeds and rolls a new puzzle:
+*   **Detail**: Every user message/reaction does two silent things: (1) `markInteracted` refreshes their last-interaction timestamp (this drives the tiered lurker badges `👀`/`⚠️👀`/`❗👀`, which are *applied* later by `!interactions build`, not immediately), and (2) when the tekker feature is up, the activity scanner rolls a random chance to spawn a puzzle. Both are silent.
+*   **Exception**: A log entry is only created if the activity trigger succeeds and rolls a new puzzle:
     *   `[INFO] [TEKKER] Activity trigger succeeded: unique contributors = N/T. Launching drop...`
 
 ### 2. Voice Channel Scanning Loops

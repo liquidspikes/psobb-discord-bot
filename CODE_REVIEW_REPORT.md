@@ -1,9 +1,11 @@
 # Code Review & Verification Report — PSOBB Discord Bot + psobb.io Website
 
-_Generated: 2026-06-08_
+_Generated: 2026-06-08 · Updated: 2026-06-08 (follow-up session)_
+
+> **Follow-up changes since generation** (this session): tekker activity scanner gated behind `isFeatureUp('tekker')` + `tekker_db` error logging made circuit-breakered (log flood fixed); lurker badges reworked into tiers (`👀`/`⚠️👀`/`❗👀`); `!sync all` and `!interactions` **fully separated** (sync = linked players/💠 only; `!interactions build [deep]` owns the scan + census + eyes badges); 💠 now always overwrites eyes when a member becomes linked; vestigial roleSync exports trimmed; all living docs updated to match. Items below reflect the current state.
 
 ## Scope reviewed
-- **Bot** (`psobb-discord-bot`): `bot.js` + all 18 modules under `src/`, configuration, and docs.
+- **Bot** (`psobb-discord-bot`): `bot.js` + all 21 modules under `src/`, configuration, and docs.
 - **Website** (`psobb.io-website-public`): every bot-facing API endpoint — `bot_api.php`, `bot_tekker_db.php`, `get_drops.php`, `summary.php`, the `.htaccess` rewrite layer, and the section-ID/class maps the bot consumes.
 
 All bot JavaScript passes `node --check` (no syntax errors). The architecture is clean: `bot.js` only wires events; each concern is isolated in its own module with consistent action-logging and defensive `try/catch` so one subsystem failing can't take down the others.
@@ -15,10 +17,10 @@ All bot JavaScript passes `node --check` (no syntax errors). The architecture is
 | Feature | Status | Notes |
 |---|---|---|
 | **AI assistant (Gemini + tool-calling)** | ✅ | 11 tools wired with handlers; tool loop capped at 5 iterations; reply chunking under 2000 chars; per-user public-channel history isolation. |
-| **Role & nickname sync** | ✅ | Assign-existing-only, permission-driven cleanup, no-op signature cache, per-user `!lock`, lurker/linked badge swap, offline last-character cache. Solid. |
+| **Role & nickname sync** | ✅ | Assign-existing-only, permission-driven cleanup, no-op signature cache, per-user `!lock`, offline last-character cache. `!sync all` now syncs **linked players (💠) only**; 💠 always overwrites any lurker eyes (applied even on a role-assignment error). Solid. |
 | **Boot self-check** (`selfCheck`) | ✅ | Genuinely good — exercises the sync hot path on a fixture at startup and DMs admins the result. |
 | **Tekker Challenge minigame** | ✅ | Bot logic ↔ `bot_tekker_db.php` op surface matches 1:1; token mint/gift/claim/admin ops all present. |
-| **Interaction log + badges** | ✅ | 2-week active window with disk-write throttling. |
+| **Interaction log + badges** | ✅ | Tiered idle classification — `👀` (14–45d), `⚠️👀` (45d+), `❗👀` (never; deep scan only) — with disk-write throttling. Owned end-to-end by `!interactions build [deep]` (separated from `!sync`). |
 | **LFG announcer** | ✅ | Cursor seeding avoids backlog dump; mention allowlist prevents `@everyone` injection from post text. |
 | **Party voice rooms** | ✅ | Private per-game channels, state persisted, grace-period teardown, reconcile on boot. |
 | **Admin commands** (`!sync all`, `!roles`, `!channels`, `!log`, `!clear`, `!pull`, `!restart`, `!tekker …`, `!interactions`) | ✅ | All routed, all permission-gated, DM-chunked reports. |
@@ -28,14 +30,14 @@ All bot JavaScript passes `node --check` (no syntax errors). The architecture is
 
 ## Bugs found
 
-### 🔴 1. `!quests` is broken — shadowed by the deprecated `!quest` handler
-`src/messageHandler.js:245`
+### 🔴 1. `!quests` is broken — shadowed by the deprecated `!quest` handler _(still open)_
+`src/messageHandler.js:258`
 ```js
 if (message.content.startsWith('!quest') || message.content.startsWith('$quest')) {
     return await message.reply("📡 Notice: ...deprecated...");
 }
 ```
-`"!quests".startsWith("!quest")` is `true`, so `!quests` returns the *deprecated* notice and never reaches the AI handler at line 286. The README (lines 54, 121) and the line-286 routing both clearly intend `!quests` to call `get_player_info`. **A documented player command is dead.**
+`"!quests".startsWith("!quest")` is `true`, so `!quests` returns the *deprecated* notice and never reaches the AI handler at line 299. The README (line 96) and the line-299 routing both clearly intend `!quests` to call `get_player_info`. **A documented player command is dead.**
 
 **Fix:** make the deprecation match exactly — e.g. `/^!quest(\s|$)/` / `/^\$quest(\s|$)/`, or move the `!quests`/`!progress`/`!progression`/`!stats` check above the `!quest` check.
 
@@ -76,7 +78,7 @@ Currently **dormant**, because `bot_api.php` returns class as a *string name*, a
 
 1. **Gemini model id `"gemini-3.5-flash"`** (`src/model.js:10`) — **verify this is a real, enabled model** on your API key. If the id is wrong, *every* AI reply throws and users only ever see the "Communication Interrupted" fallback. This is the single highest-impact thing to confirm before trusting the AI features.
 
-2. **Hardcoded absolute paths for the vote tools** (`src/tools.js:130,162,190`): `/home/alexzimmerman/gemini-psobb-scripts/current_vote.json`. Tied to one machine/user. If the deploy path differs, `get_active_vote_status` / `get_recent_votes` silently return "No active vote." Move to config.
+2. **Hardcoded absolute path for the vote tools** (`src/tools.js:13` — `VOTE_SCRIPTS_DIR = '/home/alexzimmerman/gemini-psobb-scripts'`, used at lines 136/168/196–197): now centralized in one const (was three inline literals) but **still hardcoded**, tied to one machine/user. If the deploy path differs, `get_active_vote_status` / `get_recent_votes` silently return "No active vote." Move to config.
 
 3. **`agent_state.json` is not in the repo** — only `agent_state.json.bak`. `get_decryption_status` fetches the live `.json`, which an external pipeline must generate. Also note the `.htaccess` `^([^\.]+)$` rewrite won't touch a path containing a dot, so the real file must physically exist at `api/agent_state.json`. Fails gracefully if absent, but the decryption tool is non-functional until that file is produced.
 
@@ -84,11 +86,11 @@ Currently **dormant**, because `bot_api.php` returns class as a *string name*, a
 
 5. **Legacy SDK**: `@google/generative-ai` is the deprecated package (superseded by `@google/genai`). Works today; plan a migration.
 
-6. **No real test runner**: `package.json` `test` is a stub; the only tests are manual scratch scripts (`scratch/test_*.js`). The boot `selfCheck` partially compensates for the role-sync path.
+6. **No real test runner**: `package.json` `test` is a stub and there are no automated test scripts (the previously-referenced `scratch/test_*.js` no longer exist). The boot `selfCheck` partially compensates for the role-sync path; `diag_get_player.js` / `test_api.js` at the repo root are manual API probes, not tests.
 
 7. **Minor**: `handledMessages` dedup set is hard-cleared at >1000 entries (`messageHandler.js:49`), creating a tiny window where a just-seen message could be reprocessed. Low impact; a FIFO/TTL eviction would be cleaner.
 
-8. **`!help` doc mismatch**: README line 53 says "`!help` is intentionally left for the website," but `messageHandler.js:271` routes `!help` to `handleHelpCommand`. Behavior is fine — just update the README.
+8. **`!help` doc mismatch** — ✅ FIXED (2026-06-08). The README previously said "`!help` is intentionally left for the website," but `messageHandler.js:284` routes `!help` (alias of `!commands`) to `handleHelpCommand`. The README now documents `!help` as a `!commands` alias.
 
 ---
 

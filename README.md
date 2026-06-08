@@ -43,8 +43,9 @@ and follow the links.
 - Reward tokens: winning generates a unique claim code (`T-XXXXXX`) that users can check via `!tokens`, gift via `!gift`, or claim via `!claim`.
 
 ### Interaction Log & Lurker Badges
-- A persistent record (`interactions.json`) tracking if users have ever sent a message or added a reaction.
-- Displays a lurker badge (`👀`) for linked members who have never chatted or reacted on the server, or a active badge (`💠`) for those who have. Badges swap dynamically on their first activity.
+- A persistent record (`interactions.json`) of each user's **last** message/reaction timestamp, used to classify how long unlinked members have been idle.
+- **Linked** members always wear the `💠` diamond (set by role sync, and it always overwrites any eyes — becoming linked wins). **Unlinked** members get a tiered eyes badge based on idle time: `👀` (idle 14–45 days), `⚠️👀` (45+ days), or `❗👀` (never interacted — only after a full-history deep scan). Admins and Community Support are exempt.
+- Lurker badges are applied by **`!interactions build`**; the `!sync` commands handle linked players (`💠`) only — the two are separated. Live activity refreshes the timestamp immediately, but the eyes badge itself updates on the next `!interactions build`.
 
 ### Dependency health check & graceful degradation
 On startup the bot **probes every website/server endpoint it depends on** and disables any
@@ -91,7 +92,7 @@ The model can call these tools against the server API / website:
 ### Commands
 
 **Player commands**
-- `!commands` — lists the player-facing commands and how to use them (admin commands are omitted). (`!help` is intentionally left for the website.)
+- `!commands` (alias `!help`) — lists the player-facing commands and how to use them (admins also get a DM of the admin commands).
 - `!stats`, `!quests`, `!progress`, `!progression` — routed to the AI (which calls `get_player_info` and reports character stats / quest & area-unlock progress).
 - `!sync` — **manually refresh your roles and nickname** from your linked PSOBB account (see below). Reports the real outcome, including any missing roles or hierarchy/permission problems that blocked the change.
 - `!lock secid` / `!unlock secid` — opt out of (or back into) the bot changing your **Section ID role** on a sync.
@@ -117,8 +118,8 @@ The model can call these tools against the server API / website:
 - `!tekker setclaimed <token_id> <on/off>` — Mark a token as claimed/unclaimed.
 - `!tekker threshold [n]` — View or set the drop-trigger unique user threshold.
 - `!interactions` — Display stats for the interaction log.
-- `!interactions build` — Build/census the log, adding all current server members with `interacted: false`.
-- `!interactions check @User` — Inspect the interaction status of a specific user.
+- `!interactions build` *(admin; optional `deep`)* — Scan message history (45 days, or full history with `deep`), census all members into the log, **and apply the tiered lurker badges** (`👀`/`⚠️👀`, plus `❗👀` on `deep`). This is the only command that writes lurker badges.
+- `!interactions check @User` — Report the user's tier: `✅` active, `👀` (14–45d idle), `⚠️👀` (45d+), or `❗👀` (never).
 - `!health` — Re-run the **website dependency health check** and DM/post a report of which dependencies are reachable and which features are consequently enabled/disabled. Use this after deploying website changes to re-enable a feature without restarting the bot.
 
 - `!clear <count>` (alias `!purge <count>`) — **bulk-deletes the last `<count>` messages** in the channel it's run in. The count is required and explicit (e.g. `!clear 50`); it's capped at 500 and, per Discord's rules, can only remove messages newer than 14 days. The bot needs **Manage Messages** in that channel. **Clears over 100 messages require a react-to-confirm** (✅ within 30s) from the admin who ran it. Every use is logged (who cleared how many, where), and a short self-deleting confirmation is posted.
@@ -276,7 +277,7 @@ nicknames. Set `"enabled": false` to turn the whole role system off.
 | `/psobb-bot/memory/<discordId>.json` | Per-user social memory. |
 | `/psobb-bot/memory/linked_roster.json` | Persisted set of Discord IDs known to be linked (role-sync fallback). |
 | `/psobb-bot/memory/last_character.json` | Last active character name seen per Discord ID while online — pins **offline** syncs to the player's last-used character. |
-| `/psobb-bot/memory/interactions.json` | JSON map of user IDs to boolean interaction statuses. |
+| `/psobb-bot/memory/interactions.json` | `{ users: { id: lastInteractionMs }, meta: { lastFullScanAt } }` (legacy flat `{ id: ts }` / boolean maps are migrated on load). |
 | `/psobb-bot/memory/questions.log` | Append-only log of incoming questions. |
 | `/psobb-bot/memory/actions.log` | Persistent backend action log surfaced by `!log` (auto-trimmed to ~8–10k lines). |
 
@@ -290,8 +291,6 @@ These live at the repo root and are run manually (not part of the bot process):
 | --- | --- |
 | `test_api.js` | Quick smoke test of the PSOBB API — prints `get_online_players` and `get_events` responses. Run `node test_api.js`. |
 | `diag_get_player.js` | Dumps the raw `get_player` API response for one Discord ID so you can see how many character slots the server returns and each slot's index/fields. Run `node diag_get_player.js <discord_id>`. |
-| `scratch/test_interactions.js` | Tests user interaction logging, bulk tracking, and nickname badge builder. Run `node scratch/test_interactions.js`. |
-| `scratch/test_tekker.js` | Tests the Tekker Challenge game loops and token flows using a mock API backend database client. Run `node scratch/test_tekker.js`. |
 | `get_player_all_slots.patch` | **Server-side patch for the psobb.io _website_ repo** ([`liquidspikes/psobb.io-website-public`](https://github.com/liquidspikes/psobb.io-website-public)), not this bot. It rewrites `api/bot_api.php`'s `get_player` action to enumerate **all** character save slots (0–19) instead of only the classic 4. Apply it there with `git apply get_player_all_slots.patch`, then `php -l api/bot_api.php`, then deploy. The bot needs no change to consume the extra slots. |
 
 > The character-slot limit is a server-side concern: the bot already forwards every character the API returns. `diag_get_player.js` confirms the count before/after applying the patch.

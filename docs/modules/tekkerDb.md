@@ -20,7 +20,8 @@ Also exports **`ping()`** — a raw `ping` op (no logging) used by [`healthcheck
 [`tekkerChallenge`](tekkerChallenge.md), [`messageHandler`](messageHandler.md) (`!tekker`/`!tokens` admin paths), [`bot.js`](bot.md) (`initDb`).
 
 ## Key behaviors / gotchas
-- 8s timeout; failures log to `TEKKER` and return `null`/`[]`/sensible defaults (e.g. threshold falls back to 30), so the minigame degrades instead of crashing.
+- 8s timeout; failures return `null`/`[]`/sensible defaults (e.g. threshold falls back to 30), so the minigame degrades instead of crashing.
+- **Circuit-breaker logging:** the scanner hits `call()` on every message, so errors are de-duplicated — it logs `TEKKER` **once** when the store first goes down, stays silent while it's down, and logs once on recovery (instead of one error per op per message). Successful ops never log. The `ping` op is excluded from the breaker (healthcheck/initDb do their own logging).
 - The **server op names here must exactly match** the `switch ($op)` cases in `bot_tekker_db.php`. Adding an op means editing both files.
 
 ## Related website endpoints

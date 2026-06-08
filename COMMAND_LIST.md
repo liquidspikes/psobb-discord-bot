@@ -96,9 +96,9 @@ A comprehensive list of all player-facing and administrator commands available o
 *   **`!interactions`** (without arguments)
     *   *Usage*: `!interactions`
     *   *Purpose*: Displays summary statistics for the server's user interaction log.
-*   **`!interactions build`**
-    *   *Usage*: `!interactions build`
-    *   *Purpose*: Performs a full census of all non-bot guild members to initialize them as lurkers (`👀` badge) in `interactions.json`.
+*   **`!interactions build`** (optional `deep`)
+    *   *Usage*: `!interactions build` or `!interactions build deep`
+    *   *Purpose*: Scans message history (45 days, or full history with `deep`), censuses all non-bot members into `interactions.json`, **and applies the tiered lurker badges** to unlinked members: `👀` (idle 14–45d), `⚠️👀` (idle 45d+), and — `deep` only — `❗👀` (never interacted). This is the only command that writes lurker badges; `!sync all` handles linked players (`💠`).
 *   **`!interactions check`**
     *   *Usage*: `!interactions check @User`
-    *   *Purpose*: Checks whether the given user is currently recorded as interacted (`true`) or a lurker (`false`).
+    *   *Purpose*: Reports the user's tier: `✅` active, `👀` (14–45d idle), `⚠️👀` (45d+ idle), or `❗👀` (never interacted).
