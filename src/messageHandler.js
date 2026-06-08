@@ -39,8 +39,12 @@ function registerMessageHandlers() {
         try {
             const { markInteracted } = require('./interactions');
             markInteracted(user.id);
-            const { trackActivity } = require('./tekkerChallenge');
-            await trackActivity(user.id, reaction.message.guild, 'reaction');
+            // Skip the tekker scanner when the feature is disabled (dependency
+            // down) — otherwise every reaction spams failed tekker_db calls.
+            if (isFeatureUp('tekker')) {
+                const { trackActivity } = require('./tekkerChallenge');
+                await trackActivity(user.id, reaction.message.guild, 'reaction');
+            }
         } catch (e) {}
     });
 
@@ -55,7 +59,9 @@ function registerMessageHandlers() {
         if (message.guild && message.author && !message.author.bot) {
             const { markInteracted } = require('./interactions');
             markInteracted(message.author.id);
-            if (!message.content.startsWith('!') && !message.content.startsWith('/')) {
+            // Skip the tekker scanner when the feature is disabled (dependency
+            // down) — otherwise every chat message spams failed tekker_db calls.
+            if (!message.content.startsWith('!') && !message.content.startsWith('/') && isFeatureUp('tekker')) {
                 const { trackActivity } = require('./tekkerChallenge');
                 trackActivity(message.author.id, message.guild, 'message').catch(() => {});
             }

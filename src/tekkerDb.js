@@ -12,6 +12,26 @@ const { logInfo, logError } = require('./actionLog');
 const TEKKER_DB_URL = config.tekker_db_url
     || String(config.psobb_api_url || '').replace('bot_api.php', 'bot_tekker_db.php');
 
+// Circuit-breaker for error logging: the scanner hits this on every message, so a
+// down backend would otherwise emit one error per op per message. Instead we log
+// once when the store first goes down, stay silent while it's down, and log once
+// when it recovers. Successful ops never log.
+let backendDown = false;
+
+function noteFailure(detail) {
+    if (!backendDown) {
+        backendDown = true;
+        logError('TEKKER', `tekker_db unreachable — suppressing further errors until it recovers: ${detail}`);
+    }
+}
+
+function noteSuccess() {
+    if (backendDown) {
+        backendDown = false;
+        logInfo('TEKKER', 'tekker_db recovered.');
+    }
+}
+
 // One POST per op: { op, ...params } → { success, result } | { success:false, error }.
 async function call(op, params = {}) {
     const url = TEKKER_DB_URL;
@@ -20,12 +40,17 @@ async function call(op, params = {}) {
             headers: { 'Authorization': "Bearer " + config.psobb_api_secret, 'Content-Type': 'application/json' },
             timeout: 8000,
         });
-        if (resp.data && resp.data.success) return resp.data.result;
-        logError('TEKKER', `tekker_db ${op} → ${(resp.data && resp.data.error) || 'unknown error'}`);
+        if (resp.data && resp.data.success) {
+            if (op !== 'ping') noteSuccess();
+            return resp.data.result;
+        }
+        // 'ping' is a deliberate probe (healthcheck/initDb do their own logging) —
+        // keep it out of the breaker so it stays silent and doesn't double-log.
+        if (op !== 'ping') noteFailure(`${op} → ${(resp.data && resp.data.error) || 'unknown error'}`);
         return null;
     } catch (e) {
         const status = e.response ? e.response.status : null;
-        logError('TEKKER', `tekker_db ${op}${status ? ` [${status}]` : ''} → ${e.message}`);
+        if (op !== 'ping') noteFailure(`${op}${status ? ` [${status}]` : ''} → ${e.message}`);
         return null;
     }
 }
