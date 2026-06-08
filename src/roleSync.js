@@ -11,7 +11,8 @@ const { ChannelType } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
-const { hasInteracted } = require('./interactions');
+const { hasInteracted, scanGuildHistory } = require('./interactions');
+const { canSupport, memberTier, resolveMember } = require('./permissions');
 const {
     SUBCLASS_TO_MAIN,
     SECTION_ID_NAMES,
@@ -151,14 +152,23 @@ const NICK_PREFIX = String(
         : String.fromCodePoint(0x1F4A0)
 ).trim();
 
-// Lurker badge: a linked member who has never interacted (no message/reaction) in
-// the server gets this instead of the 💠 diamond, until their first interaction
-// flips them. Configurable via role_sync.nickname_prefix_lurker; default 👀.
+// Lurker badge: applied to UNLINKED members who have never interacted (no message in
+// the server's recent history). Linked members ALWAYS wear the 💠 diamond instead —
+// the eyes are specifically the "joined but never linked and never spoke" marker.
+// Configurable via role_sync.nickname_prefix_lurker; default 👀.
 const EYES_PREFIX = String(
     (config.role_sync || {}).nickname_prefix_lurker !== undefined
         ? (config.role_sync || {}).nickname_prefix_lurker
         : '👀'
 ).trim();
+
+// Holders of these roles are server staff/regulars and must NEVER be tagged as a 👀
+// lurker, regardless of message history. Admins (Administrator permission) and anyone
+// already wearing the 💠 diamond are exempt too. Defaults to "Community Support";
+// extend via role_sync.lurker_exempt_roles (role names or ids, case-insensitive).
+const LURKER_EXEMPT_ROLES = new Set(
+    (((config.role_sync || {}).lurker_exempt_roles) || ['Community Support']).map((r) => String(r).toLowerCase())
+);
 
 // All prefixes the bot manages, so a nickname rebuild strips whichever is present
 // (and swaps 👀 ↔ 💠 cleanly) without ever stacking.
@@ -218,14 +228,14 @@ async function syncMember(member, playerInfo) {
     const nicknameLocked = !!locks.nickname;
     const effectiveTargets = sectionLocked ? { ...targets, sectionRole: null } : targets;
 
-    // Badge: 💠 if the member has interacted in the server, 👀 (lurker) if not.
-    // Including the interaction state + whether the expected badge is already present
-    // makes the badge roll out, swap 👀→💠 on first interaction, and self-heal if
-    // removed — even while roles/level are otherwise unchanged.
-    const interacted = hasInteracted(member.id);
-    const badge = interacted ? NICK_PREFIX : EYES_PREFIX;
+    // Badge: a LINKED member always wears the 💠 diamond — the diamond marks a linked
+    // PSOBB.io account and must never be overwritten with the 👀 lurker badge (the eyes
+    // are applied separately, only to UNLINKED members; see applyLurkerBadge). Tracking
+    // whether the diamond is already present lets it roll out and self-heal if removed,
+    // even while roles/level are otherwise unchanged.
+    const badge = NICK_PREFIX;
     const hasBadge = !badge || (member.nickname || '').startsWith(badge);
-    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', interacted ? 'I' : 'L', hasBadge ? 'P' : ''].join('|');
+    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', hasBadge ? 'P' : ''].join('|');
     if (lastSyncSignature.get(member.id) === sig) {
         result.skipped = true;
         result.ok = true;
@@ -303,6 +313,57 @@ async function syncMember(member, playerInfo) {
     const summary = `Synced ${member.user.tag}: [${result.applied.join(', ') || 'no roles matched'}] Lvl ${level}`;
     if (result.roleError) logWarn('ROLE-SYNC', `${summary} — ERROR: ${result.roleError}`);
     else logInfo('ROLE-SYNC', summary);
+    return result;
+}
+
+// A member is exempt from the 👀 lurker badge when they are: a bot, a server admin,
+// already wearing the 💠 diamond (a linked account — never overwrite a diamond), or a
+// holder of a configured exempt role (default "Community Support"). Used by the
+// unlinked-member badge pass so eyes only ever land on genuine, non-staff lurkers.
+function isLurkerExempt(member) {
+    if (!member || (member.user && member.user.bot)) return true;
+    if (member.permissions && member.permissions.has('Administrator')) return true;
+    if (NICK_PREFIX && (member.nickname || '').startsWith(NICK_PREFIX)) return true;
+    return member.roles.cache.some(
+        (r) => LURKER_EXEMPT_ROLES.has(r.id) || LURKER_EXEMPT_ROLES.has(r.name.toLowerCase())
+    );
+}
+
+// Apply (or clear) the 👀 lurker badge on an UNLINKED member. Eyes go to unlinked
+// members who have NOT interacted within the active window and are not exempt
+// (admins / Community Support / anyone already wearing 💠). A member who has since
+// interacted — or become exempt — has any stale eyes badge stripped. This is the
+// unlinked counterpart to syncMember (which handles linked members + the 💠 diamond).
+// Returns { changed, action: 'eyes' | 'cleared' | 'none', error }.
+async function applyLurkerBadge(member) {
+    const result = { changed: false, action: 'none', error: null };
+    if (!member || (member.user && member.user.bot) || !EYES_PREFIX) return result;
+
+    const current = member.nickname || '';
+    const hasEyes = current.startsWith(EYES_PREFIX);
+    // Lurker = unlinked (caller only passes unlinked members) + not exempt + no real
+    // interaction recorded in the active window.
+    const lurker = !isLurkerExempt(member) && !hasInteracted(member.id);
+
+    let desired;
+    if (lurker) {
+        desired = buildManagedNick(current || member.user.username, 0, true, EYES_PREFIX);
+    } else if (hasEyes) {
+        // No longer a lurker (interacted, or now exempt) — strip the eyes badge.
+        desired = stripManagedPrefix(current || member.user.username).substring(0, 32);
+    } else {
+        return result; // not a lurker, no stale badge → nothing to do
+    }
+
+    if (!desired || desired === current) return result;
+    try {
+        await member.setNickname(desired, 'PSOBB lurker badge');
+        result.changed = true;
+        result.action = lurker ? 'eyes' : 'cleared';
+    } catch (e) {
+        result.error = e.message;
+        logWarn('ROLE-SYNC', `Could not set lurker nickname for ${member.user.tag}: ${e.message}`);
+    }
     return result;
 }
 
@@ -526,9 +587,17 @@ async function handleSyncAllCommand(message) {
         if (!message.guild) {
             return await message.reply('⚠️ Run `!sync all` in the server (not DMs).');
         }
-        if (!message.member || !message.member.permissions.has('Administrator')) {
-            return await message.reply('🔒 `!sync all` is for server admins only. Use `!sync` to sync just yourself.');
+        if (!canSupport(message.member)) {
+            return await message.reply('🔒 `!sync all` is for server admins and Community Support only. Use `!sync` to sync just yourself.');
         }
+
+        // Pull the full member list, then recurse the server's recent message history to
+        // record who has actually interacted. This MUST happen before the lurker pass so
+        // the 👀 eyes only land on members with no real activity — not on everyone just
+        // because the going-forward interaction log started out empty.
+        const status = await message.reply('🔎 Scanning server history to see who has actually interacted… this can take a moment.');
+        await message.guild.members.fetch().catch(() => {});
+        const scan = await scanGuildHistory(message.guild);
 
         // Collect every Discord ID to sync. Primary source is the website's full
         // list of linked accounts (get_linked_players) so this reaches everyone who
@@ -554,11 +623,7 @@ async function handleSyncAllCommand(message) {
         }
 
         const total = ids.size;
-        if (total === 0) {
-            return await message.reply('ℹ️ No linked players are known yet. Players appear here after they run `!sync` once or are seen online.');
-        }
-
-        const status = await message.reply(`🔄 Syncing **${total}** linked player(s)… this can take a moment.`);
+        await status.edit(`🔄 Scanned ${scan.messagesScanned} messages. Syncing **${total}** linked player(s)…`).catch(() => {});
 
         const stats = { synced: 0, unchanged: 0, notInGuild: 0, notLinked: 0, errors: 0, processed: 0 };
         const missingRoles = new Set();
@@ -589,14 +654,42 @@ async function handleSyncAllCommand(message) {
             await delay(400); // rate-limit friendly, same pacing as the periodic tick
         }
 
+        // Unlinked lurker pass: walk EVERY member and, for those who are NOT linked,
+        // apply the 👀 eyes badge when they have no recorded interaction (verified by the
+        // history scan above) and aren't exempt (admins / Community Support / anyone
+        // already wearing 💠). Members who have since spoken get a stale eyes badge
+        // stripped. Linked members are skipped here — they got their 💠 in the loop above.
+        const lurkerStats = { eyes: 0, cleared: 0, skipped: 0, errors: 0, checked: 0 };
+        const members = [...message.guild.members.cache.values()];
+        let j = 0;
+        for (const member of members) {
+            if (!member || (member.user && member.user.bot)) continue;
+            if (ids.has(String(member.id))) continue; // linked — already handled (got 💠)
+            lurkerStats.checked++;
+            const r = await applyLurkerBadge(member);
+            if (r.error) lurkerStats.errors++;
+            else if (r.action === 'eyes') lurkerStats.eyes++;
+            else if (r.action === 'cleared') lurkerStats.cleared++;
+            else lurkerStats.skipped++;
+            if (r.changed) { j++; await delay(400); } // only pace when we actually wrote
+            if (j > 0 && j % 25 === 0) {
+                await status.edit(`👀 Tagging unlinked lurkers… ${lurkerStats.checked} checked (👀 ${lurkerStats.eyes} new · ✨ ${lurkerStats.cleared} cleared)`).catch(() => {});
+            }
+        }
+
         let summary = `✅ **Full sync complete** — processed ${stats.processed}/${total} linked player(s).\n`;
         summary += `• Updated: **${stats.synced}**\n`;
         summary += `• Already correct: **${stats.unchanged}**\n`;
         if (stats.notInGuild) summary += `• Linked but not in this server: **${stats.notInGuild}**\n`;
         if (stats.notLinked) summary += `• No longer linked (skipped): **${stats.notLinked}**\n`;
         if (stats.errors) summary += `• Errors: **${stats.errors}** (see \`!log\`)\n`;
+        summary += `\n👀 **Unlinked lurker pass** — checked ${lurkerStats.checked} unlinked member(s):\n`;
+        summary += `• Tagged 👀: **${lurkerStats.eyes}**\n`;
+        if (lurkerStats.cleared) summary += `• Cleared (now active): **${lurkerStats.cleared}**\n`;
+        if (lurkerStats.errors) summary += `• Couldn't rename: **${lurkerStats.errors}** (often admins/owner — Discord blocks bot renames)\n`;
+        summary += `_(History scan read ${scan.messagesScanned} messages across ${scan.channelsScanned} channels.)_\n`;
         if (missingRoles.size) summary += `⚠️ Roles not found on this server (ask an admin to create them): ${[...missingRoles].join(', ')}`;
-        logInfo('ROLE-SYNC', `!sync all by ${message.author.tag}: updated ${stats.synced}, unchanged ${stats.unchanged}, notInGuild ${stats.notInGuild}, notLinked ${stats.notLinked}, errors ${stats.errors}.`);
+        logInfo('ROLE-SYNC', `!sync all by ${message.author.tag}: linked updated ${stats.synced}/unchanged ${stats.unchanged}/notInGuild ${stats.notInGuild}/notLinked ${stats.notLinked}/errors ${stats.errors}; lurkers eyes ${lurkerStats.eyes}/cleared ${lurkerStats.cleared}/errors ${lurkerStats.errors} of ${lurkerStats.checked} checked.`);
         return await status.edit(summary).catch(() => message.reply(summary));
     } catch (e) {
         logError('ROLE-SYNC', `!sync all error for ${message.author.tag}: ${e.message}`);
@@ -703,60 +796,96 @@ async function handleNicknameCommand(message) {
 }
 
 // Everyone command: "!commands" (alias "!help") — list the player-facing commands
-// publicly. When an ADMIN runs it, the privileged command list (!sync all, !roles,
-// !channels, !log, !clear, !pull, !restart) is additionally DMed to them so the
-// admin surface isn't advertised in a shared channel.
+// publicly. The privileged lists are DMed (never posted publicly) based on the
+// caller's tier: admins get the full admin surface, Community Support gets a curated
+// read-only/support set. Works in DMs too — the caller's server roles are resolved
+// from the configured guild so a DM invocation still detects their tier.
 async function handleHelpCommand(message) {
     const invoked = message.content.trim().split(/\s+/)[0] || '!commands';
-    logInfo('COMMAND', `${invoked} by ${message.author.tag} (${message.author.id})`);
-    const lines = [
+    // Resolve the caller's GuildMember even from a DM so tier detection works anywhere.
+    const member = await resolveMember(message);
+    const tier = memberTier(member); // 'admin' | 'support' | 'member'
+    logInfo('COMMAND', `${invoked} by ${message.author.tag} (${message.author.id}) — tier ${tier}`);
+
+    // ---- Public player help -------------------------------------------------
+    const playerLines = [
         '**`!sync`** — Update your Discord roles & nickname from your linked PSOBB character (class, level, Section ID). Linked players always get the 💠 badge on their nickname.',
         '**`!nickname <name>`** (alias `!nick`) — Set your server nickname through me (you can\'t rename yourself directly here). Example: `!nickname RedRanger`. I keep your 💠 badge, and add your `LVL` level unless you\'ve locked your nickname.',
         '**`!lock nickname`** — Stop me changing your **nickname** on syncs (your `LVL` suffix stops updating). `!unlock nickname` lets me manage it again. The 💠 badge always stays while you\'re linked.',
         '**`!lock secid`** — Stop me changing your **Section ID** role on syncs. `!unlock secid` allows it again.',
         '**`!lock`** — Show your current lock settings.',
-        '**`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]`** — Solve the active **❓ SPECIAL WEAPON** drop puzzle to win a reward token (stats divisible by 5; Hit ≤ 50%, others ≤ 100%).',
+        '**`!commands`** (alias `!help`) — Show this message.',
+    ];
+    // Subsection: the Tekker Challenge / weapon-token commands only matter when a drop
+    // puzzle is live, so they get their own titled block instead of being mixed in.
+    const weaponLines = [
+        '**`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]`** — Solve the active drop puzzle to win a reward token (stats divisible by 5; Hit ≤ 50%, others ≤ 100%).',
         '**`!tokens`** — View your saved reward tokens (everyone, including admins).',
         '**`!gift <token_id> @player`** — Gift one of your reward tokens to another player.',
         '**`!claim <token_id>`** — Redeem a reward token (in-game redemption coming soon; for now it confirms your token is saved).',
-        '**`!commands`** (alias `!help`) — Show this message.',
     ];
     let reply =
         `🛰️ **PSOBB Bot — Player Commands**\n` +
-        lines.map((l) => `• ${l}`).join('\n') +
+        playerLines.map((l) => `• ${l}`).join('\n') +
+        `\n\n__❓ When a **SPECIAL WEAPON** appears in the chat__\n` +
+        weaponLines.map((l) => `• ${l}`).join('\n') +
         `\n\n💠 The diamond badge marks a Discord account linked to a PSOBB.io account — I keep it on your nickname automatically.` +
         `\nℹ️ Not linked yet? Sign in at https://psobb.io/login and link your Discord in your player dashboard, then run \`!sync\`.` +
         `\n💬 You can also **@mention me** or DM me to ask about your characters, stats, missions, or item drop rates.`;
 
-    // Admins also get the privileged command list — DMed, never posted publicly.
-    const isAdmin = message.guild && message.member && message.member.permissions.has('Administrator');
-    if (isAdmin) {
-        const adminLines = [
-            '**`!sync all`** — Force a full re-sync of every linked player (website roster + online), online or not.',
-            '**`!roles`** — DM you a full server **role** audit (present / missing / above the bot).',
-            '**`!channels`** — DM you a full **channel permission** audit.',
-            '**`!log`** — Show the recent bot action log.',
-            '**`!clear`** (alias `!purge`) — Bulk-delete recent messages.',
-            '**`!pull`** (aliases `!update`, `!gitpull`) — Git-pull the latest code and restart.',
-            '**`!restart`** — Restart the bot process.',
-            '**`!tekker`** — Show the current Tekker Challenge status (active drop / trigger pool).',
-            '**`!tekker roll`** — Manually roll a new Tekker Challenge puzzle right now.',
-            '**`!tekker tokens`** — DM you every reward token across all players (owner, stats, claim status).',
-            '**`!tekker grant @user N AB M D Hit`** — Mint a token with set stats for a player.',
-            '**`!tekker revoke <token_id>`** — Delete a token.',
-            '**`!tekker give <token_id> @user`** — Reassign a token to another player.',
-            '**`!tekker setclaimed <token_id> <on|off>`** — Mark a token claimed/unclaimed.',
-            '**`!tekker threshold [n]`** — View or set the drop-trigger threshold.',
-        ];
+    // ---- Privileged help (DMed, never posted publicly) ----------------------
+    const guildName = (member && member.guild && member.guild.name) || (message.guild && message.guild.name) || '';
+
+    // Curated support set — read-only / support tooling. Community Support can RUN
+    // every command listed here; the destructive surface is admin-only (below).
+    const supportLines = [
+        '**`!sync all`** — Recurse the server\'s recent history, then re-sync every linked player (💠) and tag unlinked lurkers (👀).',
+        '**`!roles`** — DM you a full server **role** audit (present / missing / above the bot).',
+        '**`!channels`** — DM you a full **channel permission** audit.',
+        '**`!log`** — Show the recent bot action log.',
+        '**`!health`** — Re-check website dependencies and report which features are enabled/disabled.',
+        '**`!interactions`** — Lurker/active log stats (👀 unlinked lurkers vs ✅ recently-active; linked members always wear 💠).',
+        '**`!interactions check @user`** — Show whether a specific member is active or a lurker.',
+    ];
+    // Admin-only surface — destructive actions + log-mutating / token-minting commands.
+    const adminOnlyLines = [
+        '**`!interactions build`** — *(admin)* Recurse server history, then census all current members into the interaction log.',
+        '**`!clear`** (alias `!purge`) — *(admin)* Bulk-delete recent messages.',
+        '**`!pull`** (aliases `!update`, `!gitpull`) — *(admin)* Git-pull the latest code and restart.',
+        '**`!restart`** — *(admin)* Restart the bot process.',
+        '**`!tekker`** — Show the current Tekker Challenge status (active drop / trigger pool).',
+        '**`!tekker roll`** (alias `!tekker start`) — *(admin)* Manually roll a new Tekker Challenge puzzle now.',
+        '**`!tekker tokens`** (alias `!tekker all`) — *(admin)* DM you every reward token across all players.',
+        '**`!tekker grant @user N AB M D Hit`** — *(admin)* Mint a token with set stats for a player.',
+        '**`!tekker revoke <token_id>`** (alias `!tekker delete`) — *(admin)* Delete a token.',
+        '**`!tekker give <token_id> @user`** (alias `!tekker setowner`) — *(admin)* Reassign a token to another player.',
+        '**`!tekker setclaimed <token_id> <on|off>`** — *(admin)* Mark a token claimed/unclaimed.',
+        '**`!tekker threshold [n]`** — *(admin)* View or set the drop-trigger threshold.',
+    ];
+
+    if (tier === 'admin') {
         const adminMsg =
-            `🔐 **PSOBB Bot — Admin Commands**${message.guild ? ` (for ${message.guild.name})` : ''}\n` +
-            adminLines.map((l) => `• ${l}`).join('\n');
+            `🔐 **PSOBB Bot — Admin Commands**${guildName ? ` (for ${guildName})` : ''}\n` +
+            `__Support tooling__\n` + supportLines.map((l) => `• ${l}`).join('\n') +
+            `\n\n__Admin-only__\n` + adminOnlyLines.map((l) => `• ${l}`).join('\n');
         try {
             await message.author.send(adminMsg);
             reply += `\n\n🔐 I also DMed you the **admin commands**.`;
         } catch (e) {
             logWarn('ROLE-SYNC', `${invoked} admin DM failed for ${message.author.tag}: ${e.message}`);
             reply += `\n\n🔐 You're an admin — I tried to DM you the admin commands but couldn't. Enable DMs from server members and try again.`;
+        }
+    } else if (tier === 'support') {
+        const supportMsg =
+            `🛠️ **PSOBB Bot — Community Support Commands**${guildName ? ` (for ${guildName})` : ''}\n` +
+            `You can run these support commands (destructive/admin actions are restricted):\n` +
+            supportLines.map((l) => `• ${l}`).join('\n');
+        try {
+            await message.author.send(supportMsg);
+            reply += `\n\n🛠️ I also DMed you the **Community Support commands**.`;
+        } catch (e) {
+            logWarn('ROLE-SYNC', `${invoked} support DM failed for ${message.author.tag}: ${e.message}`);
+            reply += `\n\n🛠️ You're Community Support — I tried to DM you your support commands but couldn't. Enable DMs from server members and try again.`;
         }
     }
 
@@ -897,9 +1026,9 @@ async function handleRolesCommand(message) {
         if (!message.guild) {
             return await message.reply('⚠️ Run `!roles` in the server (not DMs).');
         }
-        // Restrict to server administrators, since the audit exposes server config.
-        if (!message.member || !message.member.permissions.has('Administrator')) {
-            return await message.reply('🔒 `!roles` is for server admins only.');
+        // Restrict to staff, since the audit exposes server config.
+        if (!canSupport(message.member)) {
+            return await message.reply('🔒 `!roles` is for server admins and Community Support only.');
         }
         const audit = await auditGuildRoles(message.guild);
         const report = `**${message.guild.name}**\n${formatRoleAudit(audit)}`;
@@ -994,8 +1123,8 @@ async function handleChannelsCommand(message) {
         if (!message.guild) {
             return await message.reply('⚠️ Run `!channels` in the server (not DMs).');
         }
-        if (!message.member || !message.member.permissions.has('Administrator')) {
-            return await message.reply('🔒 `!channels` is for server admins only.');
+        if (!canSupport(message.member)) {
+            return await message.reply('🔒 `!channels` is for server admins and Community Support only.');
         }
         const audit = await auditGuildChannels(message.guild);
         const report = `**${message.guild.name}**\n${formatChannelAudit(audit)}`;
@@ -1085,6 +1214,8 @@ module.exports = {
     auditGuildChannels,
     dmAdminReport,
     syncMember,
+    applyLurkerBadge,
+    isLurkerExempt,
     selectProfile,
     computeTargetRoleNames,
     buildManagedNick,

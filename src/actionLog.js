@@ -94,8 +94,9 @@ async function handleLogCommand(message) {
         if (!message.guild) {
             return await message.reply('⚠️ Run `!log` in the server (not DMs).');
         }
-        if (!message.member || !message.member.permissions.has('Administrator')) {
-            return await message.reply('🔒 `!log` is for server admins only.');
+        const { canSupport } = require('./permissions');
+        if (!canSupport(message.member)) {
+            return await message.reply('🔒 `!log` is for server admins and Community Support only.');
         }
 
         // Parse an optional line count: "!log", "!log 100".

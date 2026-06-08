@@ -233,8 +233,9 @@ function toolDownResult(toolName) {
 async function handleHealthCommand(message) {
     try {
         if (!message.guild) return await message.reply('⚠️ Run `!health` in the server (not DMs).');
-        if (!message.member || !message.member.permissions.has('Administrator')) {
-            return await message.reply('🔒 `!health` is for server admins only.');
+        const { canSupport } = require('./permissions');
+        if (!canSupport(message.member)) {
+            return await message.reply('🔒 `!health` is for server admins and Community Support only.');
         }
         logInfo('COMMAND', `!health by ${message.author.tag} (${message.author.id})`);
         await message.reply('🔄 Re-checking website dependencies…');

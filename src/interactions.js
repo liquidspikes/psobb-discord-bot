@@ -8,6 +8,7 @@
 // =====================================================================
 const fs = require('fs');
 const path = require('path');
+const { PermissionFlagsBits } = require('discord.js');
 const { MEMORY_DIR } = require('./config');
 const { logInfo, logError } = require('./actionLog');
 
@@ -69,6 +70,68 @@ function markInteracted(id) {
     save();
 }
 
+// Record an interaction at a SPECIFIC timestamp (used when back-filling from real
+// message history). Keeps the most recent timestamp ever seen for the user. Unlike
+// markInteracted() this does NOT write to disk on every call — the bulk history scan
+// mutates the map and calls save() once at the end. Returns true if it changed state.
+function recordInteractionAt(id, ts) {
+    id = String(id);
+    const prev = log.get(id) || 0;
+    if (ts > prev) { log.set(id, ts); return true; }
+    return false;
+}
+
+// Walk every readable text channel and back-fill the interaction log from real message
+// history within the active window (default 2 weeks — messages older than that can't
+// change anyone's active/lurker status anyway, so we stop paginating once we cross it).
+// This is how `!sync all` "recurses the entire Discord to verify a player hasn't
+// interacted" BEFORE the badge pass decides who gets the 👀 lurker badge. Records each
+// author's real last-message time so the 2-week window reflects their actual activity,
+// not the moment of the scan. Returns { channelsScanned, messagesScanned, updated }.
+async function scanGuildHistory(guild, { sinceMs = TWO_WEEKS_MS, perChannelCap = 10000 } = {}) {
+    const cutoff = Date.now() - sinceMs;
+    let channelsScanned = 0, messagesScanned = 0, updated = 0, changed = false;
+    const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+
+    const channels = [...guild.channels.cache.values()].filter(
+        (ch) => ch && typeof ch.isTextBased === 'function' && ch.isTextBased() && typeof ch.messages?.fetch === 'function'
+    );
+
+    for (const ch of channels) {
+        // Only scan channels the bot can actually read history in.
+        if (me) {
+            const perms = ch.permissionsFor(me);
+            if (!perms || !perms.has(PermissionFlagsBits.ViewChannel) || !perms.has(PermissionFlagsBits.ReadMessageHistory)) continue;
+        }
+        channelsScanned++;
+        let before;
+        let fetchedHere = 0;
+        try {
+            // Paginate newest → oldest; stop at the cutoff, the per-channel cap, or the end.
+            while (fetchedHere < perChannelCap) {
+                const batch = await ch.messages.fetch({ limit: 100, ...(before ? { before } : {}) }).catch(() => null);
+                if (!batch || batch.size === 0) break;
+                let reachedCutoff = false;
+                for (const msg of batch.values()) {
+                    messagesScanned++;
+                    if (msg.createdTimestamp < cutoff) { reachedCutoff = true; continue; }
+                    if (msg.author && !msg.author.bot && recordInteractionAt(msg.author.id, msg.createdTimestamp)) {
+                        updated++; changed = true;
+                    }
+                }
+                before = batch.last().id;
+                fetchedHere += batch.size;
+                if (reachedCutoff || batch.size < 100) break;
+            }
+        } catch (e) {
+            logError('INTERACT', `History scan error in #${ch.name || ch.id}: ${e.message}`);
+        }
+    }
+    if (changed) save();
+    logInfo('INTERACT', `History scan: ${channelsScanned} channel(s), ${messagesScanned} msg(s) read, ${updated} interaction timestamp(s) updated.`);
+    return { channelsScanned, messagesScanned, updated };
+}
+
 // Admin "build the first log": ensure every current member has an entry. New
 // members default to 0 (never interacted) so the census is complete; existing values
 // are preserved. Returns { added, total, interacted }.
@@ -97,19 +160,30 @@ async function handleInteractionsCommand(message) {
         if (!message.guild) {
             return await message.reply('⚠️ Run `!interactions` in the server (not DMs).');
         }
-        if (!message.member || !message.member.permissions.has('Administrator')) {
-            return await message.reply('🔒 `!interactions` is for server admins only.');
+        const { canSupport, isAdmin } = require('./permissions');
+        if (!canSupport(message.member)) {
+            return await message.reply('🔒 `!interactions` is for server admins and Community Support only.');
         }
 
         if (sub === 'build') {
+            // The history scan + census is heavy and mutates the log — admins only.
+            if (!isAdmin(message.member)) {
+                return await message.reply('🔒 `!interactions build` is for server admins only. Community Support can use `!interactions` and `!interactions check @user`.');
+            }
             await message.guild.members.fetch();
+            // Back-fill from REAL message history first so members who have actually
+            // posted in the last 2 weeks are recorded as active before the census
+            // seeds the rest as never-interacted lurkers.
+            const status = await message.reply('🔎 Scanning server history to verify who has actually interacted… this can take a moment.');
+            const scan = await scanGuildHistory(message.guild);
             const ids = message.guild.members.cache.filter((m) => !m.user.bot).map((m) => m.id);
             const res = buildLog(ids);
-            logInfo('INTERACT', `Log built by ${message.author.tag}: ${res.total} tracked, ${res.interacted} interacted, ${res.added} new.`);
-            return await message.reply(
-                `🗒️ **Interaction log built.** Tracking **${res.total}** users — ✅ **${res.interacted}** are active, 👀 **${res.total - res.interacted}** are lurkers (added **${res.added}** new entries).\n` +
-                `Linked members who haven't interacted within 2 weeks show the 👀 badge until their next message/reaction.`
-            );
+            logInfo('INTERACT', `Log built by ${message.author.tag}: ${res.total} tracked, ${res.interacted} interacted, ${res.added} new; scanned ${scan.messagesScanned} msgs across ${scan.channelsScanned} channels.`);
+            return await status.edit(
+                `🗒️ **Interaction log built.** Scanned **${scan.messagesScanned}** messages across **${scan.channelsScanned}** channels.\n` +
+                `Tracking **${res.total}** users — ✅ **${res.interacted}** are active, 👀 **${res.total - res.interacted}** are lurkers (added **${res.added}** new entries).\n` +
+                `Unlinked members who haven't interacted within 2 weeks show the 👀 badge until their next message/reaction.`
+            ).catch(() => message.reply('🗒️ Interaction log built.'));
         }
 
         if (sub === 'check') {
@@ -148,6 +222,8 @@ module.exports = {
     hasInteracted,
     isKnown,
     markInteracted,
+    recordInteractionAt,
+    scanGuildHistory,
     buildLog,
     stats,
     handleInteractionsCommand,
