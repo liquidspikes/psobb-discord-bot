@@ -68,11 +68,17 @@ const ping = () => call('ping');
 
 // Diagnostic probe for the dependency health check. Unlike ping(), it does NOT
 // swallow the reason: it returns { ok, detail } where detail carries the HTTP
-// status, response body, and the URL actually hit — so a failed !health report
-// shows whether the endpoint 403'd, threw a schema/DB error, or the derived URL
-// is wrong, instead of an opaque "ping failed".
+// status, response body, and the endpoint PATH — so a failed !health report shows
+// whether the endpoint 403'd, threw a schema/DB error, or the derived path is
+// wrong, instead of an opaque "ping failed".
+// SECURITY: never log the full URL — psobb_api_url carries the API secret in its
+// "?key=..." query string. We log only the scheme+host+path (query stripped).
 async function pingDetailed() {
     const url = TEKKER_DB_URL;
+    // Redact any query string (and therefore the secret) before it can be logged.
+    let safeUrl = url;
+    try { const u = new URL(url); safeUrl = `${u.origin}${u.pathname}`; }
+    catch (e) { safeUrl = String(url).split('?')[0]; }
     try {
         const resp = await axios.post(url, { op: 'ping' }, {
             headers: { 'Authorization': "Bearer " + config.psobb_api_secret, 'Content-Type': 'application/json' },
@@ -82,14 +88,14 @@ async function pingDetailed() {
             return { ok: true };
         }
         const body = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
-        return { ok: false, detail: `HTTP ${resp.status} body=${(body || '').slice(0, 200)} url=${url}` };
+        return { ok: false, detail: `HTTP ${resp.status} body=${(body || '').slice(0, 200)} path=${safeUrl}` };
     } catch (e) {
         const status = e.response ? e.response.status : null;
         let body = '';
         if (e.response && e.response.data) {
             body = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
         }
-        return { ok: false, detail: `${e.message}${status ? ` [HTTP ${status}]` : ''}${body ? ` body=${body.slice(0, 200)}` : ''} url=${url}` };
+        return { ok: false, detail: `${e.message}${status ? ` [HTTP ${status}]` : ''}${body ? ` body=${body.slice(0, 200)}` : ''} path=${safeUrl}` };
     }
 }
 
