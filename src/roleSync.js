@@ -141,6 +141,19 @@ function isStrippableRole(role) {
 // to recognise and preserve a member's current Section ID role during a sync.
 const SECTION_ID_ROLE_SET = new Set([...SECTION_ID_NAMES].map((n) => String(n).toLowerCase()));
 
+// Live-presence role ("Pioneer.IO [ONLINE]"): held by a linked member ONLY while
+// they are online in-game, and removed the moment they go offline. Managed entirely
+// inside syncMember from playerInfo.is_online, so it stays atomic with the rest of
+// the role set and is never clobbered by the strip/replace logic. Configurable via
+// role_sync.online_role_id; set to "" to disable. NOTE: like every assigned role,
+// the bot's own role must sit ABOVE this one in the hierarchy or Discord rejects it.
+const ONLINE_ROLE_ID = String(
+    (config.role_sync || {}).online_role_id !== undefined
+        ? (config.role_sync || {}).online_role_id
+        : '1513735102759440424'
+).trim();
+let warnedOnlineRoleMissing = false;
+
 // Text/emoji prefix prepended to every linked member's nickname on a successful
 // sync. Applied REGARDLESS of the per-user nickname lock (the lock only governs
 // the "LVL<level>" suffix). Configurable via role_sync.nickname_prefix; defaults
@@ -249,7 +262,12 @@ async function syncMember(member, playerInfo) {
     // even while roles/level are otherwise unchanged.
     const badge = NICK_PREFIX;
     const hasBadge = !badge || (member.nickname || '').startsWith(badge);
-    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', hasBadge ? 'P' : ''].join('|');
+    // Live-presence role state. Fold the desired (isOnline) AND current (hasOnlineRole)
+    // states into the signature so an online↔offline flip — or a manual add/remove of
+    // the role — busts the dedup cache and forces the role set to be re-applied.
+    const isOnline = !!(playerInfo && playerInfo.is_online);
+    const hasOnlineRole = !!(ONLINE_ROLE_ID && member.roles.cache.has(ONLINE_ROLE_ID));
+    const sig = [effectiveTargets.classRole, effectiveTargets.subRole, effectiveTargets.levelRole, effectiveTargets.sectionRole, level, sectionLocked ? 'SL' : '', nicknameLocked ? 'NL' : '', hasBadge ? 'P' : '', isOnline ? 'ON' : 'OFF', hasOnlineRole ? 'OR' : ''].join('|');
     if (lastSyncSignature.get(member.id) === sig) {
         result.skipped = true;
         result.ok = true;
@@ -283,6 +301,22 @@ async function syncMember(member, playerInfo) {
         if (!isStrippableRole(r)) finalRoleIds.add(r.id);
     });
     targetRoles.forEach((r) => finalRoleIds.add(r.id));
+
+    // Live-presence role: the player holds it iff they are currently online. Remove it
+    // unconditionally first (covers the offline case and the role being non-strippable),
+    // then re-add only when online and the role actually exists on the server. This makes
+    // the online role fully driven by is_online, in the same atomic roles.set() below.
+    if (ONLINE_ROLE_ID) {
+        finalRoleIds.delete(ONLINE_ROLE_ID);
+        if (isOnline) {
+            if (guild.roles.cache.has(ONLINE_ROLE_ID)) {
+                finalRoleIds.add(ONLINE_ROLE_ID);
+            } else if (!warnedOnlineRoleMissing) {
+                warnedOnlineRoleMissing = true;
+                logWarn('ROLE-SYNC', `Online role id ${ONLINE_ROLE_ID} not found in "${guild.name}" — create it / fix role_sync.online_role_id so online players can be tagged.`);
+            }
+        }
+    }
 
     // Discord rejects the ENTIRE roles.set() call if any target role sits at or above
     // the bot's highest role. Flag those up front so we can tell the admin exactly why.
@@ -550,7 +584,71 @@ async function runRoleSyncTick(guild) {
     }
 }
 
+// Lightweight presence loop: keeps the ONLINE_ROLE in step with who is actually
+// online, far faster (default 30s) than the full identity sync. It costs ONE
+// get_online_players call per tick — that feed returns EXACTLY the set of online
+// LINKED players (each carrying discord_id; see bot_api.php), so it's the
+// authoritative online set — and writes to Discord only on an actual login/logout
+// transition. The full 5-min sync (syncMember) remains the authoritative backstop
+// and reconciler at boot; the two drive toward the same state and never fight.
+let presenceTickRunning = false;
+async function runOnlinePresenceTick(guild) {
+    if (!ONLINE_ROLE_ID || presenceTickRunning) return; // guard against overlapping ticks
+    presenceTickRunning = true;
+    try {
+        const role = guild.roles.cache.get(ONLINE_ROLE_ID) || await guild.roles.fetch(ONLINE_ROLE_ID).catch(() => null);
+        if (!role) {
+            if (!warnedOnlineRoleMissing) {
+                warnedOnlineRoleMissing = true;
+                logWarn('ROLE-SYNC', `Online role id ${ONLINE_ROLE_ID} not found in "${guild.name}" — presence updates skipped until role_sync.online_role_id is fixed.`);
+            }
+            return;
+        }
+
+        const online = await apiCall('get_online_players');
+        // Bail on an API error envelope: an outage must NOT be read as "nobody online"
+        // (that would strip the role from everyone). An empty ARRAY is a legitimate
+        // "no one online" (incl. the game server being down) and IS honoured.
+        if (online && online.error) return;
+        const entries = Array.isArray(online) ? online
+            : (online && Array.isArray(online.players) ? online.players
+            : (online && Array.isArray(online.data) ? online.data : []));
+        const onlineIds = new Set();
+        for (const entry of entries) {
+            const did = getDiscordIdFromEntry(entry);
+            if (did) onlineIds.add(String(did));
+        }
+
+        let added = 0, removed = 0;
+        // Grant to online linked members who don't yet have the role.
+        for (const id of onlineIds) {
+            if (role.members.has(id)) continue;
+            const member = await guild.members.fetch(id).catch(() => null);
+            if (!member) continue;
+            const ok = await member.roles.add(role, 'PSOBB online presence')
+                .then(() => true)
+                .catch((e) => { logWarn('ROLE-SYNC', `Could not add online role to ${member.user.tag}: ${e.message}`); return false; });
+            if (ok) { added++; addToRoster(id); }
+        }
+        // Strip from anyone currently wearing it who is no longer online. Snapshot the
+        // holder list first since member.roles.remove mutates role.members live.
+        for (const member of [...role.members.values()]) {
+            if (onlineIds.has(member.id)) continue;
+            const ok = await member.roles.remove(role, 'PSOBB offline')
+                .then(() => true)
+                .catch((e) => { logWarn('ROLE-SYNC', `Could not remove online role from ${member.user.tag}: ${e.message}`); return false; });
+            if (ok) removed++;
+        }
+        if (added || removed) logInfo('ROLE-SYNC', `Presence tick: +${added} online, -${removed} offline (now ${role.members.size} wearing the online role).`);
+    } catch (e) {
+        logError('ROLE-SYNC', `Presence tick error: ${e.message}`);
+    } finally {
+        presenceTickRunning = false;
+    }
+}
+
 let roleSyncTimer = null;
+let onlinePresenceTimer = null;
 async function startRoleSync(guild) {
     const cfg = config.role_sync || {};
     if (cfg.enabled === false) {
@@ -559,9 +657,20 @@ async function startRoleSync(guild) {
     }
     const intervalMs = Math.max(1, cfg.interval_minutes || 5) * 60 * 1000;
     await guild.roles.fetch().catch(() => {});
+    // Warm the full member cache so the presence loop's role.members view (used to
+    // find who currently wears the online role) is complete from the first tick.
+    await guild.members.fetch().catch(() => {});
     logInfo('ROLE-SYNC', `Active in "${guild.name}". Interval: ${intervalMs / 60000} min. Roster: ${linkedRoster.size} linked. Protected roles: ${PROTECTED_ROLES.size}.`);
     runRoleSyncTick(guild);
     roleSyncTimer = setInterval(() => runRoleSyncTick(guild), intervalMs);
+
+    // Fast online-presence loop (online role only). Clamped to >=10s to bound API load.
+    if (ONLINE_ROLE_ID) {
+        const presenceSec = Math.max(10, Number(cfg.online_role_interval_seconds) || 30);
+        logInfo('ROLE-SYNC', `Online-presence role loop active — every ${presenceSec}s (role id ${ONLINE_ROLE_ID}).`);
+        runOnlinePresenceTick(guild);
+        onlinePresenceTimer = setInterval(() => runOnlinePresenceTick(guild), presenceSec * 1000);
+    }
 }
 
 // Manual on-demand sync via "!sync".

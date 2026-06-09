@@ -7,8 +7,10 @@
 // an opening ping to the voice channel's built-in text chat tagging the linked
 // party members; as each additional linked player joins the game it grants them
 // access and posts an "@here <user> has entered" ping. The channel is torn down
-// (after a short grace) once the party empties of linked players. State is
-// persisted so a restart doesn't orphan channels.
+// (after a short grace) once the party drops below the minimum linked players
+// (min_linked, default 2) — e.g. a duo falling to a single player — and a fresh
+// room is reinitialized if the party fills back up. State is persisted so a
+// restart doesn't orphan channels.
 // =====================================================================
 const fs = require('fs');
 const path = require('path');
@@ -159,7 +161,7 @@ async function pollParties(guild) {
                 if (linked.length >= MIN_LINKED) await createRoom(guild, party);
                 continue;
             }
-            if (linked.length > 0) state.emptySince = null; // still active → cancel any grace
+            if (linked.length >= MIN_LINKED) state.emptySince = null; // still a full party → cancel any pending teardown grace
             const known = new Set(state.members || []);
             for (const id of linked) {
                 if (known.has(id)) continue;
@@ -171,13 +173,17 @@ async function pollParties(guild) {
             saveState();
         }
 
-        // 2. Teardown: rooms whose party is gone or has no linked members left,
-        //    after the grace window (survives brief blips / disconnects).
+        // 2. Teardown: a room lives only while the party still has at least MIN_LINKED
+        //    linked players. Once it's gone or drops BELOW the minimum (e.g. a 2-player
+        //    party falling to 1), dissolve the room after the grace window (which
+        //    survives brief blips / disconnects). If players climb back to MIN_LINKED
+        //    before that, step 1 cancels the grace; if it happens after teardown, a
+        //    fresh room is reinitialized by createRoom on a later poll.
         const now = Date.now();
         for (const gid of Object.keys(rooms)) {
             const party = byId.get(gid);
-            const empty = !party || linkedIdsOf(party).length === 0;
-            if (!empty) continue;
+            const belowMin = !party || linkedIdsOf(party).length < MIN_LINKED;
+            if (!belowMin) continue;
             const state = rooms[gid];
             if (!state.emptySince) { state.emptySince = now; saveState(); continue; }
             if (now - state.emptySince >= GRACE_MS) await teardownRoom(gid, state);

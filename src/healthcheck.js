@@ -52,10 +52,9 @@ const DEPENDENCIES = {
     },
     tekker_db: {
         label: 'Tekker store (bot_tekker_db.php)',
-        probe: async () => {
-            const r = await tekkerDb.ping();
-            return r && r.ok ? { ok: true } : { ok: false, detail: 'ping failed' };
-        },
+        // Use the detailed probe so a failure records WHY (HTTP status, response
+        // body, and the URL hit) instead of an opaque "ping failed".
+        probe: async () => tekkerDb.pingDetailed(),
     },
     drops_api: {
         label: 'Drop tables (get_drops.php)',

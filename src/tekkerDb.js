@@ -62,9 +62,36 @@ async function initDb() {
     else logError('TEKKER', 'Storage backend unreachable at startup (tekker_db ping failed).');
 }
 
-// Lightweight reachability probe used by the dependency health check. Returns
-// the raw ping result ({ ok: true }) or null on failure, without logging.
+// Lightweight reachability probe used at startup (initDb). Returns the raw ping
+// result ({ ok: true }) or null on failure, without logging.
 const ping = () => call('ping');
+
+// Diagnostic probe for the dependency health check. Unlike ping(), it does NOT
+// swallow the reason: it returns { ok, detail } where detail carries the HTTP
+// status, response body, and the URL actually hit — so a failed !health report
+// shows whether the endpoint 403'd, threw a schema/DB error, or the derived URL
+// is wrong, instead of an opaque "ping failed".
+async function pingDetailed() {
+    const url = TEKKER_DB_URL;
+    try {
+        const resp = await axios.post(url, { op: 'ping' }, {
+            headers: { 'Authorization': "Bearer " + config.psobb_api_secret, 'Content-Type': 'application/json' },
+            timeout: 8000,
+        });
+        if (resp.data && resp.data.success && resp.data.result && resp.data.result.ok) {
+            return { ok: true };
+        }
+        const body = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
+        return { ok: false, detail: `HTTP ${resp.status} body=${(body || '').slice(0, 200)} url=${url}` };
+    } catch (e) {
+        const status = e.response ? e.response.status : null;
+        let body = '';
+        if (e.response && e.response.data) {
+            body = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
+        }
+        return { ok: false, detail: `${e.message}${status ? ` [HTTP ${status}]` : ''}${body ? ` body=${body.slice(0, 200)}` : ''} url=${url}` };
+    }
+}
 
 // Active drops
 const getActiveDrop = () => call('getActiveDrop');
@@ -101,6 +128,7 @@ const setTokenClaimed = (tokenId, claimed, claimerId) => call('setTokenClaimed',
 module.exports = {
     initDb,
     ping,
+    pingDetailed,
     getActiveDrop,
     createDrop,
     deactivateDrop,
