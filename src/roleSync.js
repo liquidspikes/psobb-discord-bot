@@ -657,9 +657,11 @@ async function startRoleSync(guild) {
     }
     const intervalMs = Math.max(1, cfg.interval_minutes || 5) * 60 * 1000;
     await guild.roles.fetch().catch(() => {});
-    // Warm the full member cache so the presence loop's role.members view (used to
-    // find who currently wears the online role) is complete from the first tick.
-    await guild.members.fetch().catch(() => {});
+    // NOTE: the member cache (needed for the presence loop's role.members view of who
+    // currently wears the online role) is warmed by announceStartup, which runs just
+    // before this. We intentionally do NOT fetch all members here — keeping a second
+    // slow full-guild fetch off the startup path — and the full sync + GuildMembers
+    // events keep it fresh thereafter.
     logInfo('ROLE-SYNC', `Active in "${guild.name}". Interval: ${intervalMs / 60000} min. Roster: ${linkedRoster.size} linked. Protected roles: ${PROTECTED_ROLES.size}.`);
     runRoleSyncTick(guild);
     roleSyncTimer = setInterval(() => runRoleSyncTick(guild), intervalMs);

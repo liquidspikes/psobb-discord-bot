@@ -60,13 +60,16 @@ client.once(Events.ClientReady, async (c) => {
         }
         if (!guild) guild = c.guilds.cache.first();
         if (guild) {
+            // Send the admin boot DM FIRST, so a slow / hung / failing role-sync
+            // startup can never delay or suppress it. announceStartup also fetches
+            // the full member list, warming the cache for everything below.
+            await announceStartup(guild, selfCheckResult, healthSummary);
             // Role sync needs the player API (get_player / get_online_players).
             if (isFeatureUp('role_sync')) {
                 await startRoleSync(guild);
             } else {
                 logWarn('ROLE-SYNC', 'NOT started — the player API dependency is unavailable (see !health).');
             }
-            await announceStartup(guild, selfCheckResult, healthSummary);
             // Party voice rooms — needs the resolved guild; isolated so a failure
             // here can't take down role sync (and vice versa). Skipped entirely if
             // the get_parties dependency is missing.
