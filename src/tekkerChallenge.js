@@ -342,6 +342,17 @@ async function processGuess(message, guessArgs) {
         });
         // Tidy the per-guess feedback after the same 5s window as the guess message.
         if (message.guild) setTimeout(() => sent.delete().catch(() => {}), GUESS_TIDY_MS);
+
+        // Also DM the player their hint so it persists after the channel copy is
+        // auto-deleted. Best-effort: a closed DM just means no persistent copy.
+        try {
+            await message.author.send({
+                content: `🔎 **Tekker hint** — your guess \`${guesses.join(' ')}\` (attempt ${attemptsUsed}/${maxAttempts}):`,
+                embeds: [embed],
+            });
+        } catch (e) {
+            logWarn('TEKKER', `Could not DM hint to ${message.author.tag}: ${e.message}`);
+        }
     }
 }
 
