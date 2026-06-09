@@ -11,6 +11,12 @@
 // (min_linked, default 2) — e.g. a duo falling to a single player — and a fresh
 // room is reinitialized if the party fills back up. State is persisted so a
 // restart doesn't orphan channels.
+//
+// AUTO-MOVE (party_rooms.auto_move, on by default; needs Move Members): a party
+// member sitting in the configured lobby voice channel (party_rooms.lobby_id) is
+// pulled into their room on create/join, and moved back to the lobby when they
+// leave the party or the room is torn down. Discord can only relocate members who
+// are already connected to voice, so players not in the lobby just get the ping.
 // =====================================================================
 const fs = require('fs');
 const path = require('path');
@@ -30,6 +36,15 @@ const COMMUNITY_ROLE = String(CFG.community_support_role || '1508563507690471514
 const INTERVAL_MS = Math.max(15, CFG.interval_seconds || 25) * 1000;
 const GRACE_MS = Math.max(10, CFG.grace_seconds || 60) * 1000;       // empty-party grace before delete
 const MIN_LINKED = Math.max(1, CFG.min_linked || 2);                 // linked players needed to spawn a room
+
+// Auto-move: pull a party member who is sitting in the LOBBY voice channel into
+// their party room when it spawns / they join, and move them back to the lobby
+// when they leave the party (or the room is torn down). Discord can only relocate
+// a member who is ALREADY connected to voice, so this only affects players in the
+// lobby — anyone not in voice just gets the access grant + ping as before.
+// Requires the bot to have Move Members. Disable via party_rooms.auto_move:false.
+const LOBBY_ID = String(CFG.lobby_id || '1456493542708088941');
+const AUTO_MOVE = CFG.auto_move !== false && !!LOBBY_ID;
 
 const STATE_PATH = path.join(MEMORY_DIR, 'party_rooms.json');
 
@@ -55,6 +70,25 @@ function resolveRole(guild, idOrName) {
     return guild.roles.cache.get(idOrName)
         || guild.roles.cache.find((r) => r.name.toLowerCase() === String(idOrName).toLowerCase())
         || null;
+}
+
+// Best-effort voice move. Relocates `discordId` to `toChannelId` only if they are
+// currently connected to `requireFromId` (e.g. the lobby) — passing null requires
+// only that they are in some voice channel. Needs the Move Members permission.
+// Returns true if a move actually happened.
+async function moveMember(guild, discordId, toChannelId, requireFromId = null) {
+    if (!AUTO_MOVE || !toChannelId) return false;
+    const member = await guild.members.fetch(discordId).catch(() => null);
+    if (!member || !member.voice || !member.voice.channelId) return false; // not in voice
+    if (requireFromId && member.voice.channelId !== requireFromId) return false; // not where expected
+    if (member.voice.channelId === toChannelId) return false; // already there
+    try {
+        await member.voice.setChannel(toChannelId, 'PSOBB party room auto-move');
+        return true;
+    } catch (e) {
+        logWarn('PARTY', `Could not move ${discordId} to ${toChannelId} (have Move Members?): ${e.message}`);
+        return false;
+    }
 }
 
 // Unique discord ids of the linked players currently in a party.
@@ -110,6 +144,12 @@ async function createRoom(guild, party) {
     try {
         await channel.send({ content: msg.slice(0, 1990), allowedMentions: { parse: [], users: memberIds } });
     } catch (e) { logWarn('PARTY', `Room ${channel.id} opening ping failed: ${e.message}`); }
+    // Pull party members who are waiting in the lobby straight into the new room.
+    for (const id of memberIds) {
+        if (await moveMember(guild, id, channel.id, LOBBY_ID)) {
+            logInfo('PARTY', `Moved ${id} from lobby into room for game ${party.game_id}.`);
+        }
+    }
     logInfo('PARTY', `Created room "${name}" for game ${party.game_id} with ${memberIds.length} linked player(s).`);
 }
 
@@ -130,12 +170,25 @@ async function addMember(state, discordId) {
             allowedMentions: { parse: ['everyone'], users: [discordId] },
         });
     } catch (e) { logWarn('PARTY', `Entry ping failed in ${state.channelId}: ${e.message}`); }
+    // If they're waiting in the lobby, pull them straight into the room.
+    if (await moveMember(channel.guild, discordId, state.channelId, LOBBY_ID)) {
+        logInfo('PARTY', `Moved ${discordId} from lobby into room ${state.channelId}.`);
+    }
     return true;
 }
 
 async function teardownRoom(gameId, state) {
     const channel = await client.channels.fetch(state.channelId).catch(() => null);
     if (channel) {
+        // Move anyone still sitting in the room back to the lobby BEFORE deleting, so a
+        // teardown relocates them instead of disconnecting them from voice entirely.
+        if (AUTO_MOVE && LOBBY_ID) {
+            for (const m of [...channel.members.values()]) {
+                if (m.user.bot) continue;
+                await m.voice.setChannel(LOBBY_ID, 'PSOBB party ended — back to lobby')
+                    .catch((e) => logWarn('PARTY', `Could not move ${m.id} to lobby on teardown: ${e.message}`));
+            }
+        }
         try { await channel.delete('PSOBB party ended'); }
         catch (e) { logWarn('PARTY', `Could not delete room ${state.channelId}: ${e.message}`); }
     }
@@ -163,12 +216,27 @@ async function pollParties(guild) {
             }
             if (linked.length >= MIN_LINKED) state.emptySince = null; // still a full party → cancel any pending teardown grace
             const known = new Set(state.members || []);
+            const linkedSet = new Set(linked);
+            // New arrivals: grant access, ping, and (if they're in the lobby) pull them in.
             for (const id of linked) {
                 if (known.has(id)) continue;
                 if (await addMember(state, id)) {
                     state.members.push(id);
                     logInfo('PARTY', `Added ${id} to room for game ${gid}.`);
                 }
+            }
+            // Departures: someone we'd added is no longer in the party → move them back to
+            // the lobby (if they're still in this room) and drop their access. Pruning them
+            // from state.members means a later re-join is treated as a fresh arrival. The
+            // feed is only consulted here on a successful poll (poll bailed above on error),
+            // so a transient feed failure can't yank players out mid-game.
+            for (const id of [...(state.members || [])]) {
+                if (linkedSet.has(id)) continue;
+                await moveMember(guild, id, LOBBY_ID, state.channelId);
+                const ch = await client.channels.fetch(state.channelId).catch(() => null);
+                if (ch) { try { await ch.permissionOverwrites.delete(id, 'PSOBB left party'); } catch (e) {} }
+                state.members = state.members.filter((m) => m !== id);
+                logInfo('PARTY', `Moved ${id} back to lobby — left party for game ${gid}.`);
             }
             saveState();
         }
@@ -218,6 +286,16 @@ async function startPartyRooms(guild) {
     if (me && !me.permissions.has(PermissionFlagsBits.ManageChannels)) {
         logWarn('PARTY', 'I am missing the Manage Channels permission — I cannot create party rooms until that is granted.');
     }
+    // Auto-move needs Move Members + a real lobby voice channel to move people to/from.
+    if (AUTO_MOVE) {
+        if (me && !me.permissions.has(PermissionFlagsBits.MoveMembers)) {
+            logWarn('PARTY', 'auto_move is on but I lack the Move Members permission — players will be pinged but not pulled in/out of voice.');
+        }
+        const lobby = await client.channels.fetch(LOBBY_ID).catch(() => null);
+        if (!lobby || lobby.type !== ChannelType.GuildVoice) {
+            logWarn('PARTY', `auto_move lobby_id ${LOBBY_ID} is not a voice channel; auto-move will be a no-op until it's fixed.`);
+        }
+    }
     const supportRole = resolveRole(guild, COMMUNITY_ROLE);
     if (COMMUNITY_ROLE && !supportRole) {
         logWarn('PARTY', `Community-support role "${COMMUNITY_ROLE}" not found; party rooms will be players + admins only.`);
@@ -225,7 +303,7 @@ async function startPartyRooms(guild) {
 
     rooms = loadState();
     await reconcile();
-    logInfo('PARTY', `Party rooms active in "${category.name}". Support role: ${supportRole ? supportRole.name : '(none)'}. Interval ${INTERVAL_MS / 1000}s, grace ${GRACE_MS / 1000}s, min linked ${MIN_LINKED}. Tracking ${Object.keys(rooms).length} existing room(s).`);
+    logInfo('PARTY', `Party rooms active in "${category.name}". Support role: ${supportRole ? supportRole.name : '(none)'}. Interval ${INTERVAL_MS / 1000}s, grace ${GRACE_MS / 1000}s, min linked ${MIN_LINKED}. Auto-move: ${AUTO_MOVE ? `on (lobby ${LOBBY_ID})` : 'off'}. Tracking ${Object.keys(rooms).length} existing room(s).`);
     await pollParties(guild);
     timer = setInterval(() => pollParties(guild), INTERVAL_MS);
 }

@@ -38,6 +38,12 @@ const TEKKER_CHANNEL_ID = String(
     (config.tekker || {}).channel_id || config.tekker_channel_id || '1500859782595346462'
 );
 
+// The "Pioneer.IO [ONLINE]" role — pinged when a new drop is announced so players
+// currently in-game are alerted. Same id/config key as roleSync's online role.
+const ONLINE_ROLE_ID = String(
+    (config.role_sync || {}).online_role_id || '1513735102759440424'
+);
+
 // Check if a Discord User ID is linked to the website database
 function isUserLinked(userId) {
     const rosterPath = path.join(MEMORY_DIR, 'linked_roster.json');
@@ -130,7 +136,12 @@ async function announceDrop(drop) {
                              `Use \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (divisible by 5, Hit ≤ 50%, others ≤ 100%)`,
                 color: 0x00ff88 // Vibrant green
             };
-            await channel.send({ embeds: [embed] });
+            // Ping the online-players role so in-game hunters get alerted to the drop.
+            await channel.send({
+                content: ONLINE_ROLE_ID ? `<@&${ONLINE_ROLE_ID}>` : undefined,
+                embeds: [embed],
+                allowedMentions: ONLINE_ROLE_ID ? { roles: [ONLINE_ROLE_ID] } : { parse: [] },
+            });
         }
     } catch (e) {
         logError('TEKKER', `Failed to broadcast drop announcement: ${e.message}`);
@@ -145,30 +156,40 @@ async function processGuess(message, guessArgs) {
         return await message.reply(`🎮 The Tekker Challenge runs in <#${TEKKER_CHANNEL_ID}> — post your \`/guess\` there!`);
     }
 
-    // Auto-clear the player's guess message after 10s to keep the channel tidy.
+    // Auto-clear the player's guess message after 5s to keep the channel tidy.
     // Requires the bot to have Manage Messages in this channel; only in a guild
     // (can't delete others' DMs). Surface a failure so a missing perm is visible.
+    const GUESS_TIDY_MS = 5000;
     if (message.guild) {
         setTimeout(() => {
             message.delete().catch((e) =>
                 logWarn('TEKKER', `Could not auto-delete guess from ${message.author.tag} — do I have Manage Messages in #${message.channel && message.channel.name}? (${e.message})`));
-        }, 10000);
+        }, GUESS_TIDY_MS);
     }
+
+    // Bot feedback to a guess is transient too: auto-delete each reply after the same
+    // 5s window (in a guild) so the channel doesn't fill with per-attempt responses.
+    // The public win announcement below is intentionally NOT cleaned.
+    const replyTidy = async (payload) => {
+        const sent = await message.reply(payload);
+        if (message.guild) setTimeout(() => sent.delete().catch(() => {}), GUESS_TIDY_MS);
+        return sent;
+    };
 
     // 1. Resolve active drop
     const drop = await db.getActiveDrop();
     if (!drop) {
-        return await message.reply("⚠️ There is no active weapon drop puzzle right now. Activity in the server will trigger the scanner to detect a new drop!");
+        return await replyTidy("⚠️ There is no active weapon drop puzzle right now. Activity in the server will trigger the scanner to detect a new drop!");
     }
 
     // 2. Validate guess arguments
     if (!Array.isArray(guessArgs) || guessArgs.length !== 5) {
-        return await message.reply(`🗡️ **Usage**: \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (e.g. \`/guess 0 10 35 0 5\`)`);
+        return await replyTidy(`🗡️ **Usage**: \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (e.g. \`/guess 0 10 35 0 5\`)`);
     }
 
     const guesses = guessArgs.map(x => parseInt(x));
     if (guesses.some(isNaN)) {
-        return await message.reply("⚠️ Please enter valid integers for all 5 weapon stats.");
+        return await replyTidy("⚠️ Please enter valid integers for all 5 weapon stats.");
     }
 
     const categories = CATEGORIES;
@@ -189,7 +210,7 @@ async function processGuess(message, guessArgs) {
     }
 
     if (validationErrors.length > 0) {
-        return await message.reply(`⚠️ **Validation failed**:\n${validationErrors.map(e => `• ${e}`).join('\n')}`);
+        return await replyTidy(`⚠️ **Validation failed**:\n${validationErrors.map(e => `• ${e}`).join('\n')}`);
     }
 
     // 3. Resolve booster status and attempts limits
@@ -206,7 +227,7 @@ async function processGuess(message, guessArgs) {
     let attemptsUsed = playerState ? playerState.attempts_used : 0;
 
     if (attemptsUsed >= maxAttempts) {
-        return await message.reply(`⚠️ You have exhausted your attempts (**${attemptsUsed}/${maxAttempts}**) for this drop. Let other players solve it!`);
+        return await replyTidy(`⚠️ You have exhausted your attempts (**${attemptsUsed}/${maxAttempts}**) for this drop. Let other players solve it!`);
     }
 
     attemptsUsed++;
@@ -314,11 +335,13 @@ async function processGuess(message, guessArgs) {
         const status = attemptsUsed >= maxAttempts
             ? `out of attempts (${attemptsUsed}/${maxAttempts})`
             : `${attemptsUsed}/${maxAttempts} attempts`;
-        await message.channel.send({
+        const sent = await message.channel.send({
             content: `👀 <@${message.author.id}> guessed **wrong** — ${status}.`,
             embeds: [embed],
             allowedMentions: { parse: [], users: [] },
         });
+        // Tidy the per-guess feedback after the same 5s window as the guess message.
+        if (message.guild) setTimeout(() => sent.delete().catch(() => {}), GUESS_TIDY_MS);
     }
 }
 
