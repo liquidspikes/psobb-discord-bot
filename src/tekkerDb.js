@@ -8,9 +8,12 @@ const { config } = require('./config');
 const { logInfo, logError } = require('./actionLog');
 
 // The tekker store is a dedicated endpoint (api/bot_tekker_db.php), derived from
-// the configured bot_api.php URL. Allows an explicit override via tekker_db_url.
+// the configured bot_api URL by swapping the bot_api path segment. Handles BOTH
+// the extensionless pretty URL (".../bot_api?key=...", which the site's .htaccess
+// rewrites to bot_api.php) and the explicit ".../bot_api.php?key=..." form, keeping
+// whichever style the config uses. Allows an explicit override via tekker_db_url.
 const TEKKER_DB_URL = config.tekker_db_url
-    || String(config.psobb_api_url || '').replace('bot_api.php', 'bot_tekker_db.php');
+    || String(config.psobb_api_url || '').replace(/bot_api(\.php)?(\?|$)/, 'bot_tekker_db$1$2');
 
 // Circuit-breaker for error logging: the scanner hits this on every message, so a
 // down backend would otherwise emit one error per op per message. Instead we log
