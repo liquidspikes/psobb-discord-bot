@@ -22,8 +22,18 @@ const LFG_CHANNEL_ID = String(
 // Poll cadence; floor of 15s to stay friendly to the API.
 const LFG_INTERVAL_MS = Math.max(15, (config.lfg_sync || {}).interval_seconds || 60) * 1000;
 
-// Map LFG "looking_for" archetype tokens to the managed class role names.
-const ARCHETYPE_TO_ROLE = { HU: 'Hunter', RA: 'Ranger', FO: 'Force' };
+// Map an LFG "looking_for" token to a managed class role name. Robust to every
+// form the website / in-game submission paths produce: the archetype codes
+// HU/RA/FO, full names Hunter/Ranger/Force, and full character classes like
+// HUmar / RAcaseal / FOnewearl (matched by their two-letter archetype prefix).
+function archetypeToRole(token) {
+    const t = String(token || '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (!t) return null;
+    if (t === 'HUNTER' || t.startsWith('HU')) return 'Hunter';
+    if (t === 'RANGER' || t.startsWith('RA')) return 'Ranger';
+    if (t === 'FORCE' || t.startsWith('FO')) return 'Force';
+    return null;
+}
 
 // Persisted cursor: the highest LFG post id we've already announced.
 const CURSOR_PATH = path.join(MEMORY_DIR, 'last_lfg_id.json');
@@ -57,7 +67,7 @@ function buildAnnouncement(guild, post) {
     const roleIds = [];
     const seen = new Set();
     for (const tok of wanted) {
-        const roleName = ARCHETYPE_TO_ROLE[tok];
+        const roleName = archetypeToRole(tok);
         if (!roleName || seen.has(roleName)) continue;
         seen.add(roleName);
         const role = guild && findRole(guild, roleName);

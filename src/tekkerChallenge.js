@@ -31,6 +31,13 @@ const cooldowns = {
 // Target role ID for Server Boosters
 const BOOSTER_ROLE_ID = '1500893249861324832';
 
+// Dedicated channel the Tekker game runs in: drops are announced here and only
+// guesses posted here are accepted. Configurable via tekker.channel_id (or
+// top-level tekker_channel_id); falls back to the #tekker-challenge channel id.
+const TEKKER_CHANNEL_ID = String(
+    (config.tekker || {}).channel_id || config.tekker_channel_id || '1500859782595346462'
+);
+
 // Check if a Discord User ID is linked to the website database
 function isUserLinked(userId) {
     const rosterPath = path.join(MEMORY_DIR, 'linked_roster.json');
@@ -112,7 +119,7 @@ async function generateDrop() {
 // Broadcast drop announcement embed to the configured channel
 async function announceDrop(drop) {
     try {
-        const channel = await client.channels.fetch(config.channel_id).catch(() => null);
+        const channel = await client.channels.fetch(TEKKER_CHANNEL_ID).catch(() => null);
         if (channel) {
             const embed = {
                 title: `🚨 SPECIAL WEAPON DROP: [${MASKED_WEAPON}] 🚨`,
@@ -132,10 +139,20 @@ async function announceDrop(drop) {
 
 // Process user guess and return feedback embed
 async function processGuess(message, guessArgs) {
-    // Auto-clear the player's guess message after 10s to keep the channel tidy
-    // (requires Manage Messages; only in a guild — can't delete others' DMs).
+    // Confine the game to its channel: a guess made elsewhere (in a guild) is
+    // pointed back to the Tekker channel and does NOT consume an attempt.
+    if (message.guild && message.channel.id !== TEKKER_CHANNEL_ID) {
+        return await message.reply(`🎮 The Tekker Challenge runs in <#${TEKKER_CHANNEL_ID}> — post your \`/guess\` there!`);
+    }
+
+    // Auto-clear the player's guess message after 10s to keep the channel tidy.
+    // Requires the bot to have Manage Messages in this channel; only in a guild
+    // (can't delete others' DMs). Surface a failure so a missing perm is visible.
     if (message.guild) {
-        setTimeout(() => { message.delete().catch(() => {}); }, 10000);
+        setTimeout(() => {
+            message.delete().catch((e) =>
+                logWarn('TEKKER', `Could not auto-delete guess from ${message.author.tag} — do I have Manage Messages in #${message.channel && message.channel.name}? (${e.message})`));
+        }, 10000);
     }
 
     // 1. Resolve active drop
