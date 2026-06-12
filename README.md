@@ -98,10 +98,11 @@ The model can call these tools against the server API / website:
 - `!lock secid` / `!unlock secid` — opt out of (or back into) the bot changing your **Section ID role** on a sync.
 - `!lock nickname` / `!unlock nickname` — opt out of (or back into) the bot changing your **nickname** on a sync. `!lock` on its own shows your current settings.
 - `!quest` / `$quest` — deprecated; returns a notice that bounties are now automatic.
-- `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` (or `!guess`) — Guess the hidden stats of the active `❓ SPECIAL WEAPON` drop.
+- `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` — Guess the hidden stats of the active `❓ SPECIAL WEAPON` drop (slash command; the old `!guess` prefix now just points you to `/guess`).
 - `!tokens` — View your saved, unclaimed reward tokens.
 - `!gift <token_id> @User` — Gift one of your reward tokens to another player.
-- `!claim <token_id>` — Claim a reward token to drop it in-game.
+- `!trade @User <your_token> <their_token>` — Propose a token-for-token swap; the other player confirms with ✅ (60s) and ownership is exchanged.
+- `!claim` — Explains how to redeem your tokens for a weapon on https://psobb.io/ (done online in-game; you can combine up to 3 tokens into one weapon).
 
 **Admin commands** (require the **Administrator** permission; the report is sent to the requester via **DM**)
 - `!sync all` — force a full re-sync of **every linked player** (everyone linked on the website, unioned with the persisted roster + currently-online players), online or offline. Posts a live progress line and a final summary. Respects each member's `!lock` settings.
@@ -111,11 +112,10 @@ The model can call these tools against the server API / website:
 - `!restart` — **restarts the bot.** It confirms in-channel, then exits cleanly; the service supervisor relaunches a fresh process within a few seconds. **Requires the process to be supervised with an auto-restart policy** (see [Running as a service](#running-as-a-service)).
 - `!tekker` — Show the current Tekker status (active drop, trigger pool, and threshold).
 - `!tekker roll` (or `!tekker start`) — Force roll a new drop puzzle manually.
-- `!tekker tokens` — DMs all reward tokens across all players (unclaimed, claimed, owner).
+- `!tekker tokens` — DMs both the outstanding **unclaimed tokens** and the **claimed-rewards** history (who claimed which tokens for what item).
 - `!tekker grant @User <Native> <A.Beast> <Machine> <Dark> <Hit>` — Grant a token with specified stats.
 - `!tekker revoke <token_id>` — Delete a token.
 - `!tekker give <token_id> @User` — Reassign a token to another user.
-- `!tekker setclaimed <token_id> <on/off>` — Mark a token as claimed/unclaimed.
 - `!tekker threshold [n]` — View or set the drop-trigger unique user threshold.
 - `!interactions` — Display stats for the interaction log.
 - `!interactions build` *(admin; optional `deep`)* — Scan message history (45 days, or full history with `deep`), census all members into the log, **and apply the tiered lurker badges** (`👀`/`⚠️👀`, plus `❗👀` on `deep`). This is the only command that writes lurker badges.

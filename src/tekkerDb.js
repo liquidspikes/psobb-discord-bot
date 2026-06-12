@@ -132,11 +132,13 @@ const createToken = (token) => call('createToken', token);
 const getToken = (tokenId) => call('getToken', { tokenId });
 async function getUnclaimedTokens(ownerId) { const r = await call('getUnclaimedTokens', { ownerId }); return Array.isArray(r) ? r : []; }
 async function getAllTokens() { const r = await call('getAllTokens'); return Array.isArray(r) ? r : []; }
+// Consolidated claim history (who claimed which tokens for what item). Tokens are
+// deleted from the live store on claim, so this log is the record of claimed rewards.
+async function getClaimLog(limit) { const r = await call('getClaimLog', limit ? { limit } : {}); return Array.isArray(r) ? r : []; }
 const transferToken = (tokenId, newOwnerId) => call('transferToken', { tokenId, newOwnerId });
 const markTokenClaimed = (tokenId, claimerId) => call('markTokenClaimed', { tokenId, claimerId });
 // Admin DB adjustments
 const deleteToken = (tokenId) => call('deleteToken', { tokenId });
-const setTokenClaimed = (tokenId, claimed, claimerId) => call('setTokenClaimed', { tokenId, claimed: claimed ? 1 : 0, claimerId });
 
 module.exports = {
     initDb,
@@ -161,8 +163,8 @@ module.exports = {
     getToken,
     getUnclaimedTokens,
     getAllTokens,
+    getClaimLog,
     transferToken,
     markTokenClaimed,
     deleteToken,
-    setTokenClaimed,
 };

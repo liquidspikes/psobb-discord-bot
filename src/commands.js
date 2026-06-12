@@ -91,19 +91,16 @@ register({
 
 register({
     name: 'claim', audience: 'member',
-    run: async (message, parts) => {
+    run: async (message) => {
         logInfo('COMMAND', `!claim by ${message.author.tag} (${message.author.id})`);
-        const tokenId = parts[1];
-        if (!tokenId) return await message.reply("⚠️ Usage: `!claim <token_id>` (e.g. `!claim T-ABCD12`)");
-        const { claimReward } = require('./tekkerChallenge');
-        const res = await claimReward(message.author.id, tokenId.trim().toUpperCase());
-        if (res.success) {
-            return await message.reply(`✅ **Reward claimed!** ${res.message}`);
-        } else if (res.pending) {
-            return await message.reply(`🪙 ${res.message}`);
-        } else {
-            return await message.reply(`❌ **Claim failed**: ${res.error}`);
-        }
+        // Claiming is a website action: it requires you to be logged in (Discord
+        // linked) AND online in-game so the weapon can drop at your feet. The bot
+        // can't do that on your behalf, so point you to the redemption flow.
+        return await message.reply(
+            `🪙 **Claim your tokens on the website.**\n` +
+            `Log in at https://psobb.io/ with your Discord linked, hop online in-game, then redeem your weapon tokens from your dashboard — you can combine up to **3 tokens** into one weapon (higher tiers unlock with more tokens).\n` +
+            `Use \`!tokens\` to see what you're holding, or \`!trade @player <your_token> <their_token>\` to swap with someone.`
+        );
     },
 });
 
@@ -127,6 +124,98 @@ register({
 });
 
 register({
+    name: 'trade', audience: 'member',
+    run: async (message, parts) => {
+        logInfo('COMMAND', `!trade by ${message.author.tag} (${message.author.id})`);
+        if (!message.guild) {
+            return await message.reply('⚠️ Trades must be started in a server channel so the other player can confirm.');
+        }
+
+        const target = message.mentions.users.first();
+        // Token ids look like `T-XXXXXX`; pull them out in order, ignoring the @mention.
+        const tokenIds = parts.slice(1).filter(p => /^T-/i.test(p)).map(p => p.trim().toUpperCase());
+
+        if (!target || tokenIds.length !== 2) {
+            return await message.reply('⚠️ Usage: `!trade @player <your_token> <their_token>` (e.g. `!trade @Friend T-ABC123 T-XYZ789`). You offer the first token; they give you the second.');
+        }
+        if (target.id === message.author.id) {
+            return await message.reply("⚠️ You can't trade with yourself.");
+        }
+        if (target.bot) {
+            return await message.reply("⚠️ You can't trade with a bot.");
+        }
+
+        const [myToken, theirToken] = tokenIds;
+        if (myToken === theirToken) {
+            return await message.reply('⚠️ Those are the same token — pick one token from each side.');
+        }
+
+        const db = require('./tekkerDb');
+        const mine = await db.getToken(myToken);
+        const theirs = await db.getToken(theirToken);
+
+        if (!mine || String(mine.owner_id) !== message.author.id) {
+            return await message.reply(`❌ You don't own \`${myToken}\` (or it no longer exists).`);
+        }
+        if (!theirs || String(theirs.owner_id) !== target.id) {
+            return await message.reply(`❌ <@${target.id}> doesn't own \`${theirToken}\` (or it no longer exists).`);
+        }
+
+        const fmt = (t) => `${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit}`;
+
+        const offer = await message.channel.send({
+            content:
+                `🤝 **Trade offer** — <@${target.id}>, <@${message.author.id}> wants to swap tokens:\n` +
+                `• You receive: \`${myToken}\` (❓ SPECIAL WEAPON ${fmt(mine)})\n` +
+                `• You give: \`${theirToken}\` (❓ SPECIAL WEAPON ${fmt(theirs)})\n\n` +
+                `<@${target.id}> react ✅ to accept or ❌ to decline within 60s.`,
+            allowedMentions: { users: [target.id, message.author.id] },
+        });
+
+        try {
+            await offer.react('✅');
+            await offer.react('❌');
+        } catch (e) {
+            logWarn('COMMAND', `!trade could not add reactions: ${e.message}`);
+        }
+
+        const filter = (reaction, user) => ['✅', '❌'].includes(reaction.emoji.name) && user.id === target.id;
+        let collected;
+        try {
+            collected = await offer.awaitReactions({ filter, max: 1, time: 60000, errors: ['time'] });
+        } catch (e) {
+            offer.reactions.removeAll().catch(() => {});
+            return await message.channel.send(`⌛ Trade offer to <@${target.id}> expired with no response.`);
+        }
+
+        offer.reactions.removeAll().catch(() => {});
+
+        if (collected.first().emoji.name === '❌') {
+            return await message.channel.send(`❌ <@${target.id}> declined the trade.`);
+        }
+
+        // Re-validate ownership at acceptance time: either token may have been gifted,
+        // traded, or claimed away during the 60s window.
+        const mineNow = await db.getToken(myToken);
+        const theirsNow = await db.getToken(theirToken);
+        if (!mineNow || String(mineNow.owner_id) !== message.author.id ||
+            !theirsNow || String(theirsNow.owner_id) !== target.id) {
+            return await message.channel.send('⚠️ Trade aborted — one of the tokens changed hands or was claimed before both sides confirmed. Please start a new trade.');
+        }
+
+        await db.transferToken(myToken, target.id);
+        await db.transferToken(theirToken, message.author.id);
+        logInfo('TEKKER', `Trade: ${message.author.tag} (${message.author.id}) ↔ ${target.tag} (${target.id}); ${myToken}→${target.id}, ${theirToken}→${message.author.id}`);
+
+        return await message.channel.send(
+            `✅ **Trade complete!**\n` +
+            `• <@${message.author.id}> now owns \`${theirToken}\`.\n` +
+            `• <@${target.id}> now owns \`${myToken}\`.`
+        );
+    },
+});
+
+register({
     name: 'tokens', audience: 'member',
     run: async (message) => {
         logInfo('COMMAND', `!tokens by ${message.author.tag} (${message.author.id})`);
@@ -136,7 +225,7 @@ register({
             return await message.reply("ℹ️ You have no unclaimed weapon tokens. Solve a `/guess` puzzle in the channel to earn one!");
         }
         const lines = tokens.map(t => `• \`${t.token_id}\` — **❓ SPECIAL WEAPON** (${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit})`);
-        return await message.reply(`🎁 **Your Saved Weapon Tokens**:\n${lines.join('\n')}\n\n*Your tokens are saved to your account. In-game claiming is coming soon — for now use \`!gift <token_id> @PlayerName\` to transfer one to a friend.*`);
+        return await message.reply(`🎁 **Your Saved Weapon Tokens**:\n${lines.join('\n')}\n\n*Redeem these on https://psobb.io/ while logged in (Discord linked) and online in-game — you can combine up to 3 into one weapon. Or \`!gift <token_id> @player\` to give one away, or \`!trade @player <your_token> <their_token>\` to swap.*`);
     },
 });
 
@@ -159,26 +248,47 @@ register({
             logInfo('TEKKER', `Manual drop rolled by admin ${message.author.tag}: stats ${drop.stat_native}/${drop.stat_abeast}/${drop.stat_machine}/${drop.stat_dark}/${drop.stat_hit}, hint ${drop.hint_attribute}=0%.`);
             return await message.reply(`🚨 **New Tekker Challenge puzzle rolled manually by admin!**`);
         } else if (sub === 'tokens' || sub === 'all') {
-            // Admin oversight: every token earned across all players (real weapon
-            // names shown — this is the admin view used to fulfil claims).
+            // Admin oversight. Two distinct stores now: outstanding tokens still live
+            // in tekker_tokens (claimed ones are DELETED on redemption), while the
+            // record of what was claimed lives in the consolidated tekker_claim_log.
+            // Show both: outstanding (unclaimed) tokens + the claimed-rewards history.
             if (!message.member || !message.member.permissions.has('Administrator')) {
                 return await message.reply('🔒 `!tekker tokens` is for server admins only.');
             }
-            const all = await db.getAllTokens();
-            if (!all.length) {
-                return await message.reply('ℹ️ No Tekker tokens have been earned yet.');
+            // tekker_tokens only holds outstanding tokens (claims delete the row), but
+            // filter defensively in case any legacy is_claimed=1 rows linger.
+            const unclaimed = (await db.getAllTokens()).filter(t => !t.is_claimed);
+            const claims = await db.getClaimLog(100);
+
+            const sections = [];
+
+            if (unclaimed.length) {
+                const lines = unclaimed.map(t => {
+                    const stats = `${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit}`;
+                    return `• \`${t.token_id}\` — stats **${stats}** — owner <@${t.owner_id}>`;
+                });
+                sections.push(`**🎁 Unclaimed Tokens (${unclaimed.length})**\n` + lines.join('\n'));
+            } else {
+                sections.push(`**🎁 Unclaimed Tokens (0)**\n_None outstanding._`);
             }
-            const unclaimed = all.filter(t => !t.is_claimed).length;
-            const lines = all.map(t => {
-                const stats = `${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit}`;
-                const status = t.is_claimed
-                    ? `claimed by <@${t.claimed_by}> at ${t.claimed_at}`
-                    : 'UNCLAIMED';
-                return `• \`${t.token_id}\` — stats **${stats}** — owner <@${t.owner_id}> — ${status}`;
-            });
-            const report = `**Tekker Tokens — ${all.length} total · ${unclaimed} unclaimed · ${all.length - unclaimed} claimed**\n` + lines.join('\n');
+
+            if (claims.length) {
+                const lines = claims.map(c => {
+                    const stats = `${c.stat_native}/${c.stat_abeast}/${c.stat_machine}/${c.stat_dark}/${c.stat_hit}`;
+                    let ids;
+                    try { ids = JSON.parse(c.token_ids); } catch (e) { ids = null; }
+                    const idStr = Array.isArray(ids) ? ids.join(', ') : String(c.token_ids || '');
+                    const who = c.discord_id ? `<@${c.discord_id}>` : `account #${c.account_id}`;
+                    return `• ${who} → **${c.weapon_name}** (${stats}) — ${c.token_count} token(s) [${idStr}] — ${c.claimed_at}`;
+                });
+                sections.push(`**🏆 Claimed Rewards (${claims.length})**\n` + lines.join('\n'));
+            } else {
+                sections.push(`**🏆 Claimed Rewards (0)**\n_No rewards claimed yet._`);
+            }
+
+            const report = sections.join('\n\n');
             if (await dmAdminReport(message, report, '!tekker tokens')) {
-                return await message.reply(`📬 Sent you all ${all.length} Tekker token(s) in a DM.`);
+                return await message.reply(`📬 Sent you the Tekker report in a DM — **${unclaimed.length}** unclaimed token(s) · **${claims.length}** claimed reward(s).`);
             }
             return;
         } else if (sub === 'grant') {
@@ -218,19 +328,6 @@ register({
             await db.transferToken(tokenId, target.id);
             logInfo('TEKKER', `Admin ${message.author.tag} reassigned token ${tokenId} → ${target.id}`);
             return await message.reply(`🔁 Reassigned token \`${tokenId}\` to <@${target.id}>.`);
-        } else if (sub === 'setclaimed') {
-            if (!message.member || !message.member.permissions.has('Administrator')) {
-                return await message.reply('🔒 `!tekker setclaimed` is for server admins only.');
-            }
-            const tokenId = (parts[2] || '').toUpperCase();
-            const flag = (parts[3] || '').toLowerCase();
-            const claimed = ['on', '1', 'true', 'yes'].includes(flag) ? 1 : (['off', '0', 'false', 'no'].includes(flag) ? 0 : null);
-            if (!tokenId || claimed === null) return await message.reply('⚠️ Usage: `!tekker setclaimed <token_id> <on|off>`.');
-            const tok = await db.getToken(tokenId);
-            if (!tok) return await message.reply(`❌ Token \`${tokenId}\` not found.`);
-            await db.setTokenClaimed(tokenId, claimed, message.author.id);
-            logInfo('TEKKER', `Admin ${message.author.tag} set token ${tokenId} claimed=${claimed}`);
-            return await message.reply(`✅ Token \`${tokenId}\` marked **${claimed ? 'claimed' : 'unclaimed'}**.`);
         } else if (sub === 'threshold') {
             if (!message.member || !message.member.permissions.has('Administrator')) {
                 return await message.reply('🔒 `!tekker threshold` is for server admins only.');

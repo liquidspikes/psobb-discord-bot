@@ -953,10 +953,11 @@ async function handleHelpCommand(message) {
     // Subsection: the Tekker Challenge / weapon-token commands only matter when a drop
     // puzzle is live, so they get their own titled block instead of being mixed in.
     const weaponLines = [
-        '**`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]`** — Solve the active drop puzzle to win a reward token (stats divisible by 5; Hit ≤ 50%, others ≤ 100%).',
+        '**`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]`** — Solve the active drop puzzle to win a reward token (stats divisible by 5; all attributes 0–90%).',
         '**`!tokens`** — View your saved reward tokens (everyone, including admins).',
         '**`!gift <token_id> @player`** — Gift one of your reward tokens to another player.',
-        '**`!claim <token_id>`** — Redeem a reward token (in-game redemption coming soon; for now it confirms your token is saved).',
+        '**`!trade @player <your_token> <their_token>`** — Propose a token-for-token swap; the other player confirms with ✅ and ownership is exchanged.',
+        '**`!claim`** — How to redeem your tokens for a weapon on https://psobb.io/ (done online in-game; combine up to 3 tokens).',
     ];
     let reply =
         `🛰️ **PSOBB Bot — Player Commands**\n` +
@@ -989,11 +990,10 @@ async function handleHelpCommand(message) {
         '**`!restart`** — *(admin)* Restart the bot process.',
         '**`!tekker`** — Show the current Tekker Challenge status (active drop / trigger pool).',
         '**`!tekker roll`** (alias `!tekker start`) — *(admin)* Manually roll a new Tekker Challenge puzzle now.',
-        '**`!tekker tokens`** (alias `!tekker all`) — *(admin)* DM you every reward token across all players.',
+        '**`!tekker tokens`** (alias `!tekker all`) — *(admin)* DM you both the outstanding **unclaimed tokens** and the **claimed-rewards** history (who claimed which tokens for what item).',
         '**`!tekker grant @user N AB M D Hit`** — *(admin)* Mint a token with set stats for a player.',
         '**`!tekker revoke <token_id>`** (alias `!tekker delete`) — *(admin)* Delete a token.',
         '**`!tekker give <token_id> @user`** (alias `!tekker setowner`) — *(admin)* Reassign a token to another player.',
-        '**`!tekker setclaimed <token_id> <on|off>`** — *(admin)* Mark a token claimed/unclaimed.',
         '**`!tekker threshold [n]`** — *(admin)* View or set the drop-trigger threshold.',
     ];
 

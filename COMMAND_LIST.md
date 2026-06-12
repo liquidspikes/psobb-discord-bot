@@ -23,18 +23,21 @@ A comprehensive list of all player-facing and administrator commands available o
 *   **`!nickname`** (alias **`!nick`**)
     *   *Usage*: `!nickname <new_name>`
     *   *Purpose*: Updates your server nickname while keeping the bot-managed elements (`👀`/`💠` badges and `LVL` suffix).
-*   **`/guess`** (accepts prefix **`!guess`**)
-    *   *Usage*: `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` (e.g. `/guess 0 90 0 55 20`)
-    *   *Purpose*: Submits a guess to resolve the hidden stats of the active **`❓ SPECIAL WEAPON`** drop challenge.
+*   **`/guess`** (slash command)
+    *   *Usage*: `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` (e.g. `/guess 0 90 0 55 20`; each value divisible by 5, 0–90%)
+    *   *Purpose*: Submits a guess to resolve the hidden stats of the active **`❓ SPECIAL WEAPON`** drop challenge. The old text **`!guess`** prefix now just points you to the slash command.
 *   **`!tokens`**
     *   *Usage*: `!tokens`
     *   *Purpose*: Displays a list of all your saved unclaimed reward tokens.
 *   **`!gift`**
     *   *Usage*: `!gift <token_id> @Player`
     *   *Purpose*: Transfers ownership of one of your reward tokens to another player.
+*   **`!trade`**
+    *   *Usage*: `!trade @Player <your_token> <their_token>`
+    *   *Purpose*: Proposes a token-for-token swap. The other player has 60s to confirm with ✅ (or decline with ❌); ownership is exchanged only after both sides' ownership is re-validated.
 *   **`!claim`**
-    *   *Usage*: `!claim <token_id>`
-    *   *Purpose*: Redeems a reward token (spawns the item in-game at your feet once claim integration is live).
+    *   *Usage*: `!claim`
+    *   *Purpose*: Explains how to redeem your tokens. Claiming happens on https://psobb.io/ while logged in (Discord linked) and online in-game; you can combine up to 3 tokens into one weapon. The bot can't drop the item itself, so it points you to the website flow.
 *   **`!stats` / `!quests` / `!progress` / `!progression`**
     *   *Usage*: `!stats`
     *   *Purpose*: Commands starting with these prefixes are forwarded to the AI assistant to query and report your live character information, levels, and warps.
@@ -73,9 +76,9 @@ A comprehensive list of all player-facing and administrator commands available o
 *   **`!tekker roll`** (alias **`!tekker start`**)
     *   *Usage*: `!tekker roll`
     *   *Purpose*: Force-generates a new active drop puzzle instantly, resetting the trigger pool.
-*   **`!tekker tokens`**
+*   **`!tekker tokens`** (alias **`!tekker all`**)
     *   *Usage*: `!tekker tokens`
-    *   *Purpose*: DMs a registry of all reward tokens across all players in the server.
+    *   *Purpose*: DMs both the outstanding **unclaimed tokens** (with owners) and the **claimed-rewards** history (who claimed which tokens for what weapon).
 *   **`!tekker grant`**
     *   *Usage*: `!tekker grant @User <Native> <A.Beast> <Machine> <Dark> <Hit>`
     *   *Purpose*: Mints and assigns a custom token directly to a player's inventory.
@@ -85,9 +88,6 @@ A comprehensive list of all player-facing and administrator commands available o
 *   **`!tekker give`** (alias **`!tekker setowner`**)
     *   *Usage*: `!tekker give <token_id> @User`
     *   *Purpose*: Reassigns an existing token's ownership to another player.
-*   **`!tekker setclaimed`**
-    *   *Usage*: `!tekker setclaimed <token_id> <on | off>`
-    *   *Purpose*: Manually marks a token claimed or unclaimed.
 *   **`!tekker threshold`**
     *   *Usage*: `!tekker threshold [number]`
     *   *Purpose*: Views or updates the threshold count of unique active users required for a 100% trigger probability.

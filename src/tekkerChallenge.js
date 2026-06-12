@@ -105,7 +105,7 @@ async function announceDrop(drop) {
                              `• **Server Boosters**: 8 attempts\n` +
                              `• **Time Limit**: 2 hours (adds 30m per guess, max 8h)\n\n` +
                              `*First to map all stats claims the reward token!*\n` +
-                             `Use \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (divisible by 5, all attributes ≤ 100%)`,
+                             `Use \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (divisible by 5, all attributes ≤ 90%)`,
                 color: 0x00ff88 // Vibrant green
             };
             // Ping the online-players role so in-game hunters get alerted to the drop.
@@ -174,11 +174,9 @@ async function processGuess(message, guessArgs) {
         if (val % 5 !== 0) {
             validationErrors.push(`${categories[i]} must be divisible by 5.`);
         }
-        if (i === 4) { // Hit limit
-            if (val > 50) validationErrors.push(`Hit cannot exceed 50%.`);
-        } else { // Standard limit
-            if (val > 100) validationErrors.push(`${categories[i]} cannot exceed 100%.`);
-        }
+        // Every attribute (Hit included) tops out at 90%: the backend rolls a
+        // base of 15–80 and applies ±10 variance, so 90 is the hard ceiling.
+        if (val > 90) validationErrors.push(`${categories[i]} cannot exceed 90%.`);
     }
 
     if (validationErrors.length > 0) {
@@ -376,8 +374,7 @@ async function adminGrantToken(ownerId, stats) {
     if (!Array.isArray(stats) || stats.length !== 5 || stats.some((n) => !Number.isInteger(n) || n < 0 || n % 5 !== 0)) {
         return { error: 'Stats must be 5 non-negative whole numbers divisible by 5 (Native A.Beast Machine Dark Hit).' };
     }
-    if (stats[4] > 50) return { error: 'Hit cannot exceed 50%.' };
-    if (stats.slice(0, 4).some((n) => n > 100)) return { error: 'Attributes cannot exceed 100%.' };
+    if (stats.some((n) => n > 90)) return { error: 'Attributes cannot exceed 90% (Hit included).' };
 
     const tokenId = generateTokenId();
     await db.createToken({
@@ -546,8 +543,8 @@ async function processSlashGuess(interaction) {
         if (val % 5 !== 0) {
             validationErrors.push(`${categories[i]} must be divisible by 5.`);
         }
-        if (val > 100) {
-            validationErrors.push(`${categories[i]} cannot exceed 100%.`);
+        if (val > 90) {
+            validationErrors.push(`${categories[i]} cannot exceed 90%.`);
         }
     }
 

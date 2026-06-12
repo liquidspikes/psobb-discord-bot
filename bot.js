@@ -30,12 +30,15 @@ client.once(Events.ClientReady, async (c) => {
                 name: 'guess',
                 description: 'Guess the attributes of the active special weapon',
                 dm_permission: false, // guild-only: the game needs a guild + its channel
+                // Every attribute (Hit included) ranges 0–90% (backend rolls
+                // 15–80 base ±10 variance); min/max let Discord reject out-of-range
+                // input client-side before it ever reaches processSlashGuess.
                 options: [
-                    { name: 'native', type: 4, description: 'Native attribute percentage', required: true },
-                    { name: 'abeast', type: 4, description: 'A.Beast attribute percentage', required: true },
-                    { name: 'machine', type: 4, description: 'Machine attribute percentage', required: true },
-                    { name: 'dark', type: 4, description: 'Dark attribute percentage', required: true },
-                    { name: 'hit', type: 4, description: 'Hit attribute percentage', required: true },
+                    { name: 'native', type: 4, description: 'Native attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
+                    { name: 'abeast', type: 4, description: 'A.Beast attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
+                    { name: 'machine', type: 4, description: 'Machine attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
+                    { name: 'dark', type: 4, description: 'Dark attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
+                    { name: 'hit', type: 4, description: 'Hit attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
                 ]
             }
         ]);

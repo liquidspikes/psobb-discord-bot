@@ -24,7 +24,9 @@ endpoints.** Start at [`bot.js`](modules/bot.md) (the entry point) and follow th
 | `src/socialMemory.js` | [socialMemory.md](modules/socialMemory.md) | Per-user long-term social memory (JSON). |
 | `src/session.js` | [session.md](modules/session.md) | Detects a player's current in-game session. |
 | `src/tools.js` | [tools.md](modules/tools.md) | Gemini tool declarations + handlers. |
-| `src/messageHandler.js` | [messageHandler.md](modules/messageHandler.md) | DM relay + main message/command/AI handler. |
+| `src/messageHandler.js` | [messageHandler.md](modules/messageHandler.md) | DM relay + main message/AI handler + slash-command listener. |
+| `src/commands.js` | [commands.md](modules/commands.md) | Command router — registry + `dispatch()` for every `!`/`/` command. |
+| `src/permissions.js` | [permissions.md](modules/permissions.md) | Privilege tiers (admin / support / member) + DM member resolution. |
 | `src/interactions.js` | [interactions.md](modules/interactions.md) | Persistent user-interaction log + lurker badges. |
 | `src/roleSync.js` | [roleSync.md](modules/roleSync.md) | Role & nickname sync + admin audits + boot self-check. |
 | `src/lfg.js` | [lfg.md](modules/lfg.md) | LFG announcer (mirrors website LFG posts to Discord). |
@@ -55,7 +57,5 @@ the bot repo.
 - [`README.md`](../README.md) — feature overview, setup, config reference.
 - [`LOGGING_POLICY.md`](../LOGGING_POLICY.md) — what is/isn't logged.
 - [`COMMAND_LIST.md`](../COMMAND_LIST.md) — command reference.
-- [`TEKKER_CLAIM_INTEGRATION.md`](../TEKKER_CLAIM_INTEGRATION.md) — the not-yet-live claim seam.
 - [`VOTING_SYSTEM.md`](../VOTING_SYSTEM.md) — current vote setup + proposed better fix (see also [website-api/votes.md](website-api/votes.md)).
 - [`CODE_REVIEW_REPORT.md`](../CODE_REVIEW_REPORT.md) — known bugs & risks (some still open).
-- [`SITE_SQLITE3_USAGE.md`](../SITE_SQLITE3_USAGE.md) — website DB-layer map.
