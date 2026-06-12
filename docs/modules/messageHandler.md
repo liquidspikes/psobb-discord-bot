@@ -6,7 +6,9 @@
 `registerMessageHandlers()` attaches four listeners:
 1. **`raw`** — re-emits `MESSAGE_CREATE` for DMs (no `guild_id`) so DMs are handled like guild messages.
 2. **`MessageReactionAdd`** — `markInteracted`, then `trackActivity(...,'reaction')` only when `isFeatureUp('tekker')`.
-3. **`InteractionCreate`** — the **`/guess` slash command**: when `isFeatureUp('tekker')`, delegates to [`tekkerChallenge`](tekkerChallenge.md) `processSlashGuess(interaction)`; otherwise replies that the feature is down. Wraps errors so a deferred interaction is `editReply`-ed rather than double-replied.
+3. **`InteractionCreate`** — slash commands:
+   - **`/guess`**: when `isFeatureUp('tekker')`, delegates to [`tekkerChallenge`](tekkerChallenge.md) `processSlashGuess(interaction)`; otherwise replies that the feature is down. Wraps errors so a deferred interaction is `editReply`-ed rather than double-replied.
+   - **`/notify`**: reads/writes [`notificationPrefs`](notificationPrefs.md) (`type`/`action` options) and replies ephemerally with the caller's push-notification settings. No website dependency, so it isn't health-gated.
 4. **`MessageCreate`** — the main handler:
    - de-dupes via `handledMessages` Set, ignores bots/system messages;
    - `markInteracted` for guild messages; `trackActivity(...,'message')` only for non-command guild messages **and** when `isFeatureUp('tekker')`;

@@ -28,3 +28,4 @@ Almost every module (logging is cross-cutting).
 - Successful PSOBB API calls are intentionally **not** logged here (see [`api`](api.md) and `LOGGING_POLICY.md`) to avoid flooding from the role-sync tick.
 - Entry format: `[ISO ts] [LEVEL] [CATEGORY] message`.
 - The AI chatbot conversation is logged separately (`questions.log`), not here.
+- `!log` delivers via [`notificationPrefs`](notificationPrefs.md) `sendDM`, so the log DM is **silent** (no push) unless the recipient opted `DM` notifications on.

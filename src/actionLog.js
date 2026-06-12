@@ -120,20 +120,21 @@ async function handleLogCommand(message) {
         const report = `${header}\n\`\`\`\n${body}\n\`\`\``;
 
         try {
+            const { sendDM } = require('./notificationPrefs');
             // Chunk under Discord's 2000-char limit, keeping code fences intact.
             if (report.length <= 1990) {
-                await message.author.send(report);
+                await sendDM(message.author, report);
             } else {
-                await message.author.send(header);
+                await sendDM(message.author, header);
                 let chunk = '';
                 for (const line of entries) {
                     if (chunk.length + line.length + 1 > 1900) {
-                        await message.author.send('```\n' + chunk + '\n```');
+                        await sendDM(message.author, '```\n' + chunk + '\n```');
                         chunk = '';
                     }
                     chunk += (chunk ? '\n' : '') + line;
                 }
-                if (chunk) await message.author.send('```\n' + chunk + '\n```');
+                if (chunk) await sendDM(message.author, '```\n' + chunk + '\n```');
             }
         } catch (dmErr) {
             console.warn(`[ACTION-LOG] !log DM failed for ${message.author.tag}: ${dmErr.message}`);

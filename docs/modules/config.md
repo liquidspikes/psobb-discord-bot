@@ -21,7 +21,8 @@
 - `role_sync.{enabled,interval_minutes,guild_id,nickname_level,nickname_prefix,nickname_prefix_lurker,protected_roles}`
 - `lfg_sync.{enabled,channel_id,interval_seconds}` / `lfg_channel_id`
 - `party_rooms.{enabled,category_id,community_support_role,interval_seconds,grace_seconds,min_linked}`
-- `tekker_db_url` (override), `tekker.claim_enabled`
+- `tekker_db_url` (override), `tekker.claim_enabled`, `tekker.channel_id` / `tekker_channel_id`
+- `tekker.local_mode` (bool) — route all Tekker ops to the in-process [`tekkerLocalStore`](tekkerLocalStore.md) instead of the website (test mode). Also settable via env `TEKKER_LOCAL_MODE=1`. Default off.
 
 ## Depended on by
 Essentially every module. Changing a path or key here ripples everywhere.

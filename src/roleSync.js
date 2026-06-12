@@ -948,6 +948,7 @@ async function handleHelpCommand(message) {
         '**`!lock nickname`** — Stop me changing your **nickname** on syncs (your `LVL` suffix stops updating). `!unlock nickname` lets me manage it again. The 💠 badge always stays while you\'re linked.',
         '**`!lock secid`** — Stop me changing your **Section ID** role on syncs. `!unlock secid` allows it again.',
         '**`!lock`** — Show your current lock settings.',
+        '**`/notify [type] [on|off]`** (or `!notify <DM|LFG|VC> <on|off>`) — Choose which pings reach you as **push notifications**. By default DM, LFG, and VC pings are **silent** (they show in Discord but don\'t buzz your phone); turn a type **on** for real push alerts. Run `/notify` with no options to see your current settings.',
         '**`!commands`** (alias `!help`) — Show this message.',
     ];
     // Subsection: the Tekker Challenge / weapon-token commands only matter when a drop
@@ -1003,7 +1004,8 @@ async function handleHelpCommand(message) {
             `__Support tooling__\n` + supportLines.map((l) => `• ${l}`).join('\n') +
             `\n\n__Admin-only__\n` + adminOnlyLines.map((l) => `• ${l}`).join('\n');
         try {
-            for (const c of splitForDm(adminMsg)) await message.author.send(c);
+            const { sendDM } = require('./notificationPrefs');
+            for (const c of splitForDm(adminMsg)) await sendDM(message.author, c);
             reply += `\n\n🔐 I also DMed you the **admin commands**.`;
         } catch (e) {
             logWarn('ROLE-SYNC', `${invoked} admin DM failed for ${message.author.tag}: ${e.message}`);
@@ -1015,7 +1017,8 @@ async function handleHelpCommand(message) {
             `You can run these support commands (destructive/admin actions are restricted):\n` +
             supportLines.map((l) => `• ${l}`).join('\n');
         try {
-            for (const c of splitForDm(supportMsg)) await message.author.send(c);
+            const { sendDM } = require('./notificationPrefs');
+            for (const c of splitForDm(supportMsg)) await sendDM(message.author, c);
             reply += `\n\n🛠️ I also DMed you the **Community Support commands**.`;
         } catch (e) {
             logWarn('ROLE-SYNC', `${invoked} support DM failed for ${message.author.tag}: ${e.message}`);
@@ -1149,7 +1152,8 @@ function splitForDm(fullText) {
 // and returns false.
 async function dmAdminReport(message, fullText, commandName) {
     try {
-        for (const c of splitForDm(fullText)) await message.author.send(c);
+        const { sendDM } = require('./notificationPrefs');
+        for (const c of splitForDm(fullText)) await sendDM(message.author, c);
         return true;
     } catch (dmErr) {
         logWarn('AUDIT', `${commandName} DM failed for ${message.author.tag}: ${dmErr.message}`);

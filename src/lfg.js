@@ -13,6 +13,7 @@ const { config, MEMORY_DIR } = require('./config');
 const { client } = require('./discordClient');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
+const { MessageFlags } = require('discord.js');
 
 // Channel to announce in. Configurable via lfg_sync.channel_id (or top-level
 // lfg_channel_id); falls back to the #ragol-dispatch-lfg channel id.
@@ -127,8 +128,25 @@ async function pollLfg(channel) {
                     // Only the resolved class roles may ping — never @everyone/@here,
                     // arbitrary users, or anything embedded in the raw description.
                     allowedMentions: { parse: [], roles: roleIds, users: [] },
+                    flags: [MessageFlags.SuppressNotifications],
                 });
                 logInfo('LFG', `Announced LFG #${id} by ${post.character_name || 'unknown'} (looking for ${post.looking_for || 'anyone'}).`);
+
+                // Send DM notifications to opted-in users who match target roles
+                const { prefs: allPrefs } = require('./notificationPrefs');
+                const lfgEnabledUsers = Object.keys(allPrefs).filter(uid => allPrefs[uid] && allPrefs[uid].LFG === true);
+                for (const uid of lfgEnabledUsers) {
+                    try {
+                        const member = await guild.members.fetch(uid).catch(() => null);
+                        if (!member) continue;
+                        const matchesRole = roleIds.length === 0 || roleIds.some(rid => member.roles.cache.has(rid));
+                        if (matchesRole) {
+                            await member.send({
+                                content: `📣 **New LFG Alert!**\n${content}`
+                            }).catch(() => {});
+                        }
+                    } catch (dmErr) {}
+                }
             } catch (e) {
                 logWarn('LFG', `Failed to post LFG #${id}: ${e.message}`);
             }

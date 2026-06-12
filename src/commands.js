@@ -438,6 +438,49 @@ register({
 });
 
 register({
+    name: 'notify', audience: 'member',
+    run: async (message, parts) => {
+        const { getPrefs, setPref } = require('./notificationPrefs');
+        const userId = message.author.id;
+        
+        const typeInput = parts[1];
+        const actionInput = parts[2];
+        
+        if (!typeInput) {
+            const p = getPrefs(userId);
+            return await message.reply(
+                `🔔 **Notification Preferences**\n` +
+                `• DMs (Direct Messages): ${p.DM ? '✅ Enabled (push notifications)' : '🔕 Silent (by default)'}\n` +
+                `• LFG Announcements: ${p.LFG ? '✅ Enabled (push notifications)' : '🔕 Silent (by default)'}\n` +
+                `• Party Voice Rooms (VC): ${p.VC ? '✅ Enabled (push notifications)' : '🔕 Silent (by default)'}\n\n` +
+                `*Usage: \`!notify <DM|LFG|VC> <on|off|enable|disable>\` (e.g. \`!notify DM on\` or \`!notify LFG off\`)*`
+            );
+        }
+        
+        const type = typeInput.toUpperCase();
+        if (type !== 'DM' && type !== 'LFG' && type !== 'VC') {
+            return await message.reply('⚠️ Invalid notification type. Choose `DM`, `LFG`, or `VC`.');
+        }
+        
+        if (!actionInput) {
+            const p = getPrefs(userId);
+            const val = p[type];
+            return await message.reply(`🔔 **${type} Notifications** are currently: ${val ? '✅ Enabled (push)' : '🔕 Silent (default)'}.`);
+        }
+        
+        const action = actionInput.toLowerCase();
+        if (action !== 'on' && action !== 'off' && action !== 'enable' && action !== 'disable') {
+            return await message.reply('⚠️ Invalid action. Use `on`, `off`, `enable`, or `disable`.');
+        }
+        
+        const value = (action === 'on' || action === 'enable');
+        setPref(userId, type, value);
+        
+        return await message.reply(`✅ Updated! **${type}** push notifications are now **${value ? 'ENABLED' : 'DISABLED (silent)'}**.`);
+    }
+});
+
+register({
     name: 'sync', audience: 'member',
     run: (message) => handleSyncCommand(message),
 });

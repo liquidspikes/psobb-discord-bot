@@ -20,7 +20,7 @@
 // =====================================================================
 const fs = require('fs');
 const path = require('path');
-const { ChannelType, PermissionFlagsBits } = require('discord.js');
+const { ChannelType, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { client } = require('./discordClient');
 const { apiCall } = require('./api');
@@ -142,8 +142,28 @@ async function createRoom(guild, party) {
     let msg = `🎮 **Party up!** A multiplayer game **${party.name || 'Game'}**${detail ? ` (${detail})` : ''} is live.\n`;
     msg += `${mentions} — you're in this game. This private room is just for your party (+ community support). Jump in! 🔊`;
     try {
-        await channel.send({ content: msg.slice(0, 1990), allowedMentions: { parse: [], users: memberIds } });
+        await channel.send({
+            content: msg.slice(0, 1990),
+            allowedMentions: { parse: [], users: memberIds },
+            flags: [MessageFlags.SuppressNotifications]
+        });
     } catch (e) { logWarn('PARTY', `Room ${channel.id} opening ping failed: ${e.message}`); }
+
+    // DM notification to opted-in users
+    const { getPrefs } = require('./notificationPrefs');
+    for (const id of memberIds) {
+        const userPrefs = getPrefs(id);
+        if (userPrefs.VC) {
+            try {
+                const member = await guild.members.fetch(id).catch(() => null);
+                if (member) {
+                    await member.send({
+                        content: `🎮 **Party Room created!** You've been added to the voice channel for game **${party.name || 'Game'}** in the server.`
+                    }).catch(() => {});
+                }
+            } catch (dmErr) {}
+        }
+    }
     // Pull party members who are waiting in the lobby straight into the new room.
     for (const id of memberIds) {
         if (await moveMember(guild, id, channel.id, LOBBY_ID)) {
@@ -168,8 +188,28 @@ async function addMember(state, discordId) {
         await channel.send({
             content: `@here the user <@${discordId}> has entered the game and been added to the channel.`,
             allowedMentions: { parse: ['everyone'], users: [discordId] },
+            flags: [MessageFlags.SuppressNotifications]
         });
     } catch (e) { logWarn('PARTY', `Entry ping failed in ${state.channelId}: ${e.message}`); }
+
+    // DM notification to opted-in room members
+    const { getPrefs } = require('./notificationPrefs');
+    const otherMembers = (state.members || []).filter(m => m !== discordId);
+    for (const memberId of otherMembers) {
+        const userPrefs = getPrefs(memberId);
+        if (userPrefs.VC) {
+            try {
+                const member = await channel.guild.members.fetch(memberId).catch(() => null);
+                const joiningMember = await channel.guild.members.fetch(discordId).catch(() => null);
+                const joiningName = joiningMember ? joiningMember.displayName : 'A player';
+                if (member) {
+                    await member.send({
+                        content: `🔊 **VC Alert:** ${joiningName} has joined your party room for game **${channel.name}**.`
+                    }).catch(() => {});
+                }
+            } catch (dmErr) {}
+        }
+    }
     // If they're waiting in the lobby, pull them straight into the room.
     if (await moveMember(channel.guild, discordId, state.channelId, LOBBY_ID)) {
         logInfo('PARTY', `Moved ${discordId} from lobby into room ${state.channelId}.`);

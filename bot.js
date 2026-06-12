@@ -40,6 +40,33 @@ client.once(Events.ClientReady, async (c) => {
                     { name: 'dark', type: 4, description: 'Dark attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
                     { name: 'hit', type: 4, description: 'Hit attribute percentage (0–90)', required: true, min_value: 0, max_value: 90 },
                 ]
+            },
+            {
+                name: 'notify',
+                description: 'Manage push notifications for DM, LFG, and VC pings',
+                options: [
+                    {
+                        name: 'type',
+                        type: 3, // String
+                        description: 'The notification type to configure (DM, LFG, VC)',
+                        required: false,
+                        choices: [
+                            { name: 'DM', value: 'DM' },
+                            { name: 'LFG', value: 'LFG' },
+                            { name: 'VC', value: 'VC' }
+                        ]
+                    },
+                    {
+                        name: 'action',
+                        type: 3, // String
+                        description: 'Enable or disable push notifications',
+                        required: false,
+                        choices: [
+                            { name: 'Enable (on)', value: 'on' },
+                            { name: 'Disable (off)', value: 'off' }
+                        ]
+                    }
+                ]
             }
         ]);
         logInfo('SYSTEM', 'Registered global slash commands.');

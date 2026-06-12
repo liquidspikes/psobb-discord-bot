@@ -19,13 +19,14 @@
 `lfg_sync.{enabled,channel_id,interval_seconds}` (or top-level `lfg_channel_id`). Floors: interval ≥ 15s. **Hard-coded channel-id fallback** `1502345296737337474`.
 
 ## Depends on
-[`config`](config.md), [`discordClient`](discordClient.md), [`api`](api.md), [`actionLog`](actionLog.md).
+[`config`](config.md), [`discordClient`](discordClient.md), [`api`](api.md), [`actionLog`](actionLog.md), [`notificationPrefs`](notificationPrefs.md) (opt-in DMs).
 
 ## Depended on by
 [`bot.js`](bot.md).
 
 ## Key behaviors / gotchas
 - `allowedMentions` restricts pings to the resolved class role ids — never `@everyone`/users, even if embedded in the post description.
+- **Silent by default + opt-in DM:** the channel announcement is sent with `MessageFlags.SuppressNotifications` (highlights but doesn't push). After announcing, it iterates [`notificationPrefs`](notificationPrefs.md) `prefs` for users with `LFG === true`, and DMs (a real push) each one **whose roles match the post's target class roles** (or every opted-in user when the post targets no specific role). Best-effort: a closed DM is swallowed.
 - First-ever run (no cursor) seeds to the server's `latest_id` and announces nothing.
 - The endpoint returns raw (non-HTML-escaped) text because the consumer is Discord; mention safety is enforced bot-side.
 

@@ -62,7 +62,8 @@ async function announceStartup(guild, selfCheckResult = null, healthSummary = nu
         let delivered = 0;
         for (const member of admins.values()) {
             try {
-                await member.send(notice);
+                const { sendDM } = require('./notificationPrefs');
+                await sendDM(member, notice);
                 delivered++;
             } catch (e) {
                 // Admin has DMs from server members disabled; skip them.

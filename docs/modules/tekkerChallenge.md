@@ -42,8 +42,10 @@
   - **Second-zero discovery** — one zero is the public hint; a hidden second zero is revealed publicly (`discoverSecondZero`) when a player guesses it 0 with ≤2 zeros total.
   - **Stat shifts / "instability"** — `incrementDropGuesses` can trigger a syndicate (public) shift, and exhausting a personal attempt budget triggers a silent individual shift (`shiftActiveDropStats`); both clear phase messages.
   - **Despawn pulse** — each guess calls `pulseDespawnTime` (adds time, capped); the watcher expires the drop when `despawn_time` passes.
-- **Tokens carry no weapon** — only the five guaranteed percentages. A win mints a token (`createToken`) and DMs it to the winner. **Redemption happens on the website** (https://psobb.io/, while online in-game, combining up to 3 tokens); the bot never drops the item.
-- Guild guess messages and per-attempt feedback auto-delete after 5s (needs Manage Messages); the win announcement and public wrong-guess line persist.
+- **Tokens carry no weapon** — only the five guaranteed percentages. A win mints a token (`createToken`); the winner sees it in the channel embed (and the slash path's persistent ephemeral reply). **Redemption happens on the website** (https://psobb.io/, while online in-game, combining up to 3 tokens); the bot never drops the item. *(The old per-win and per-guess hint DMs were removed — the ephemeral `/guess` reply already persists the player's result.)*
+- Guild guess messages and per-attempt feedback auto-delete after 5s (needs Manage Messages); the win announcement and public wrong-guess line persist. All channel posts use `MessageFlags.SuppressNotifications` (the `@mention` highlights without pushing).
+
+- **Test mode:** when [`tekkerDb`](tekkerDb.md) `LOCAL_MODE` is on (the in-process [`tekkerLocalStore`](tekkerLocalStore.md)), the drop announcement carries a **🧪 TEST MODE** field and every win embed appends a notice that the token is a **local test token** and **real rewards aren't generated until the website is brought up to date**. Default off; production never shows these.
 
 ## Related website endpoints
 - [`bot_tekker_db.php`](../website-api/bot_tekker_db.md) — all state, via [`tekkerDb`](tekkerDb.md).

@@ -15,6 +15,19 @@ const { logInfo, logError } = require('./actionLog');
 const TEKKER_DB_URL = config.tekker_db_url
     || String(config.psobb_api_url || '').replace(/bot_api(\.php)?(\?|$)/, 'bot_tekker_db$1$2');
 
+// LOCAL TEST MODE — serve every tekker op from an in-process JSON store instead
+// of the website endpoint, so the full /guess game (incl. ops the deployed site
+// doesn't have yet) can be tested before the website PR is merged. Off by
+// default; enable with env TEKKER_LOCAL_MODE=1 or config.tekker.local_mode:true.
+const LOCAL_MODE_FLAG = String(
+    process.env.TEKKER_LOCAL_MODE || ((config.tekker || {}).local_mode) || ''
+).toLowerCase();
+const USE_LOCAL = ['1', 'true', 'yes', 'on'].includes(LOCAL_MODE_FLAG);
+const localStore = USE_LOCAL ? require('./tekkerLocalStore') : null;
+if (USE_LOCAL) {
+    logInfo('TEKKER', 'LOCAL TEST MODE ON — tekker ops served from MEMORY_DIR/tekker_local.json; website endpoint bypassed.');
+}
+
 // Circuit-breaker for error logging: the scanner hits this on every message, so a
 // down backend would otherwise emit one error per op per message. Instead we log
 // once when the store first goes down, stay silent while it's down, and log once
@@ -37,6 +50,11 @@ function noteSuccess() {
 
 // One POST per op: { op, ...params } → { success, result } | { success:false, error }.
 async function call(op, params = {}) {
+    // Test mode: dispatch synchronously to the in-process store, no HTTP.
+    if (USE_LOCAL) {
+        try { return localStore.dispatch(op, params); }
+        catch (e) { logError('TEKKER', `local store op ${op} failed: ${e.message}`); return null; }
+    }
     const url = TEKKER_DB_URL;
     try {
         const resp = await axios.post(url, { op, ...params }, {
@@ -61,7 +79,7 @@ async function call(op, params = {}) {
 // Connectivity check at boot (tables are auto-created by the website's db.php).
 async function initDb() {
     const r = await call('ping');
-    if (r && r.ok) logInfo('TEKKER', 'Storage ready (website API).');
+    if (r && r.ok) logInfo('TEKKER', USE_LOCAL ? 'Storage ready (LOCAL test store).' : 'Storage ready (website API).');
     else logError('TEKKER', 'Storage backend unreachable at startup (tekker_db ping failed).');
 }
 
@@ -77,6 +95,9 @@ const ping = () => call('ping');
 // SECURITY: never log the full URL — psobb_api_url carries the API secret in its
 // "?key=..." query string. We log only the scheme+host+path (query stripped).
 async function pingDetailed() {
+    // Test mode is always "up" — the store is in-process, so the tekker feature
+    // stays enabled and the health report shows it as the local backend.
+    if (USE_LOCAL) return { ok: true };
     const url = TEKKER_DB_URL;
     // Redact any query string (and therefore the secret) before it can be logged.
     let safeUrl = url;
@@ -141,6 +162,10 @@ const markTokenClaimed = (tokenId, claimerId) => call('markTokenClaimed', { toke
 const deleteToken = (tokenId) => call('deleteToken', { tokenId });
 
 module.exports = {
+    // True when serving from the in-process test store (no website). Consumers
+    // (e.g. tekkerChallenge) use this to warn players that won tokens are local
+    // test tokens, not real rewards, until the website is brought up to date.
+    LOCAL_MODE: USE_LOCAL,
     initDb,
     ping,
     pingDetailed,

@@ -68,6 +68,47 @@ function registerMessageHandlers() {
                     }
                 } catch (replyErr) {}
             }
+        } else if (interaction.commandName === 'notify') {
+            try {
+                const { getPrefs, setPref } = require('./notificationPrefs');
+                const type = interaction.options.getString('type');
+                const action = interaction.options.getString('action');
+                const userId = interaction.user.id;
+
+                if (!type) {
+                    const p = getPrefs(userId);
+                    return await interaction.reply({
+                        content: `🔔 **Notification Preferences**\n` +
+                                 `• DMs (Direct Messages): ${p.DM ? '✅ Enabled (push notifications)' : '🔕 Silent (by default)'}\n` +
+                                 `• LFG Announcements: ${p.LFG ? '✅ Enabled (push notifications)' : '🔕 Silent (by default)'}\n` +
+                                 `• Party Voice Rooms (VC): ${p.VC ? '✅ Enabled (push notifications)' : '🔕 Silent (by default)'}\n\n` +
+                                 `*Use \`/notify type:[type] action:on/off\` to change. Silent pings will still highlight in Discord but won't trigger push notifications or sounds.*`,
+                        ephemeral: true
+                    });
+                }
+
+                if (!action) {
+                    const p = getPrefs(userId);
+                    const val = p[type.toUpperCase()];
+                    return await interaction.reply({
+                        content: `🔔 **${type} Notifications** are currently: ${val ? '✅ Enabled (push)' : '🔕 Silent (default)'}.`,
+                        ephemeral: true
+                    });
+                }
+
+                const value = action === 'on';
+                setPref(userId, type, value);
+
+                return await interaction.reply({
+                    content: `✅ Updated! **${type}** push notifications are now **${value ? 'ENABLED' : 'DISABLED (silent)'}**.`,
+                    ephemeral: true
+                });
+            } catch (e) {
+                console.error("[SLASH NOTIFY ERROR]", e);
+                try {
+                    await interaction.reply({ content: '⚠️ An error occurred while managing notification preferences.', ephemeral: true });
+                } catch (_) {}
+            }
         }
     });
 

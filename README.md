@@ -41,6 +41,7 @@ and follow the links.
 - Forced zero hint: the generator forces one weapon attribute to `0%` and uses it as the hint.
 - Uniqueness-based activity trigger: message, reaction, and voice activity from linked users rolls a random chance to spawn a new puzzle, naturally preventing spam.
 - Reward tokens: winning generates a unique claim code (`T-XXXXXX`) that users can check via `!tokens`, gift via `!gift`, or claim via `!claim`.
+- **Local test mode** (`tekker.local_mode: true` in config, or env `TEKKER_LOCAL_MODE=1`): routes every Tekker op to an in-process JSON store (`MEMORY_DIR/tekker_local.json`, see [`src/tekkerLocalStore.js`](src/tekkerLocalStore.js)) instead of the website, so the full `/guess` game — including mechanics the deployed site doesn't have yet — can be tested before the website PR is merged. **Default off.** While it's on, the drop announcement shows a **🧪 TEST MODE** banner and every win warns that the token is a **local test token** — **real reward tokens are not generated until the website is brought up to date.** (Weapon redemption itself is a website page and isn't exercised by this mode.)
 
 ### Interaction Log & Lurker Badges
 - A persistent record (`interactions.json`) of each user's **last** message/reaction timestamp, used to classify how long unlinked members have been idle.
@@ -97,6 +98,7 @@ The model can call these tools against the server API / website:
 - `!sync` — **manually refresh your roles and nickname** from your linked PSOBB account (see below). Reports the real outcome, including any missing roles or hierarchy/permission problems that blocked the change.
 - `!lock secid` / `!unlock secid` — opt out of (or back into) the bot changing your **Section ID role** on a sync.
 - `!lock nickname` / `!unlock nickname` — opt out of (or back into) the bot changing your **nickname** on a sync. `!lock` on its own shows your current settings.
+- `/notify [type] [on|off]` (also `!notify <DM|LFG|VC> <on|off>`) — choose which pings reach you as **push notifications**. DM, LFG, and party-voice (VC) pings are **silent by default** (they highlight in Discord but don't push to your phone); turn a type **on** for real push alerts. With no arguments it shows your current settings. Stored per-user in `MEMORY_DIR/user_notifications.json` — no website dependency.
 - `!quest` / `$quest` — deprecated; returns a notice that bounties are now automatic.
 - `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` — Guess the hidden stats of the active `❓ SPECIAL WEAPON` drop (slash command; the old `!guess` prefix now just points you to `/guess`).
 - `!tokens` — View your saved, unclaimed reward tokens.

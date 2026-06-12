@@ -27,6 +27,7 @@ endpoints.** Start at [`bot.js`](modules/bot.md) (the entry point) and follow th
 | `src/messageHandler.js` | [messageHandler.md](modules/messageHandler.md) | DM relay + main message/AI handler + slash-command listener. |
 | `src/commands.js` | [commands.md](modules/commands.md) | Command router — registry + `dispatch()` for every `!`/`/` command. |
 | `src/permissions.js` | [permissions.md](modules/permissions.md) | Privilege tiers (admin / support / member) + DM member resolution. |
+| `src/notificationPrefs.js` | [notificationPrefs.md](modules/notificationPrefs.md) | Per-user push-notification opt-ins + silent-by-default `sendDM`. |
 | `src/interactions.js` | [interactions.md](modules/interactions.md) | Persistent user-interaction log + lurker badges. |
 | `src/roleSync.js` | [roleSync.md](modules/roleSync.md) | Role & nickname sync + admin audits + boot self-check. |
 | `src/lfg.js` | [lfg.md](modules/lfg.md) | LFG announcer (mirrors website LFG posts to Discord). |
@@ -35,6 +36,7 @@ endpoints.** Start at [`bot.js`](modules/bot.md) (the entry point) and follow th
 | `src/system.js` | [system.md](modules/system.md) | `!restart`, `!pull`, and the startup admin DM. |
 | `src/tekkerChallenge.js` | [tekkerChallenge.md](modules/tekkerChallenge.md) | Tekker Challenge minigame logic. |
 | `src/tekkerDb.js` | [tekkerDb.md](modules/tekkerDb.md) | Tekker storage client (HTTP → website endpoint). |
+| `src/tekkerLocalStore.js` | [tekkerLocalStore.md](modules/tekkerLocalStore.md) | In-process Tekker store for **local test mode** (no website). |
 
 ## Website dependencies (consumed by the bot)
 

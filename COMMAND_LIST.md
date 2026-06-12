@@ -23,6 +23,9 @@ A comprehensive list of all player-facing and administrator commands available o
 *   **`!nickname`** (alias **`!nick`**)
     *   *Usage*: `!nickname <new_name>`
     *   *Purpose*: Updates your server nickname while keeping the bot-managed elements (`👀`/`💠` badges and `LVL` suffix).
+*   **`/notify`** (also accepts **`!notify`**)
+    *   *Usage*: `/notify [type] [on|off]` or `!notify <DM|LFG|VC> <on|off>` (e.g. `!notify LFG on`)
+    *   *Purpose*: Controls which pings reach you as **push notifications**. DM, LFG, and VC (party voice) pings are **silent by default** — they appear in Discord but don't push to your phone. Turn a type **on** to receive real push alerts (and a direct DM for LFG/VC). Run with no arguments to view your current per-type settings.
 *   **`/guess`** (slash command)
     *   *Usage*: `/guess <Native> <A.Beast> <Machine> <Dark> <Hit>` (e.g. `/guess 0 90 0 55 20`; each value divisible by 5, 0–90%)
     *   *Purpose*: Submits a guess to resolve the hidden stats of the active **`❓ SPECIAL WEAPON`** drop challenge. The old text **`!guess`** prefix now just points you to the slash command.

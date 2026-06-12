@@ -24,4 +24,4 @@
 - **`!restart` only works under a supervisor** with auto-restart (systemd `Restart=always`); without one, it just stops the bot. See README "Running as a service".
 - `!pull` runs `git -c core.sshCommand="ssh -i /psobb-bot/.git/deploy_key ..." pull origin main` in `cwd: /psobb-bot` — paths are deployment-specific.
 - Restart waits ~1.5s before exiting so the confirmation reply and log flush land first.
-- `announceStartup` skips admins with DMs disabled and records the delivery count.
+- `announceStartup` skips admins with DMs disabled and records the delivery count. The DM goes through [`notificationPrefs`](notificationPrefs.md) `sendDM`, so the boot notice is **silent** (no push) unless the admin set `DM` notifications on.

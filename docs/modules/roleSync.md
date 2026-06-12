@@ -43,6 +43,7 @@
 - `isLinked()` requires a real character (slot with `exists !== false`) — a linked-but-character-less account is treated as not syncable.
 - Nickname fitted to Discord's 32-char cap, reserving room for the `LVL` suffix; the 💠 badge is applied regardless of the nickname lock **and regardless of role-assignment success** — becoming linked must always overwrite any stale 👀/⚠️/❗ eyes (the overwrite happens via `buildManagedNick → stripManagedPrefix`, which lists all managed prefixes longest-first).
 - `selfCheck()` runs the exact `selectProfile → computeTargetRoleNames` path on a fixture so a stale/partial deploy fails loudly at boot.
+- The DMed help (admin/support) and `dmAdminReport` audit chunks go through [`notificationPrefs`](notificationPrefs.md) `sendDM`, so they're **silent** (no push) unless the recipient opted `DM` notifications on.
 
 ## Related website endpoints
 - [`bot_api.php`](../website-api/bot_api.md) — `get_player`, `get_online_players`, `get_linked_players`. Its `$SECID_MAP`/`$CLASS_MAP` must match [`pso`](pso.md).

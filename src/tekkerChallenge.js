@@ -6,12 +6,25 @@ const { config, MEMORY_DIR } = require('./config');
 const db = require('./tekkerDb');
 const { logInfo, logWarn, logError } = require('./actionLog');
 const { client } = require('./discordClient');
+const { MessageFlags } = require('discord.js');
 
 // The tekker game deals ONLY in attribute/hit percentages — it does not pick or
 // store a weapon. A win mints a token that guarantees these stats; the actual
 // weapon is decided later by the (future) website claim page. This label is the
 // flavour name shown in Discord for the as-yet-undetermined reward.
 const MASKED_WEAPON = '❓ SPECIAL WEAPON';
+
+// Shown prominently whenever the game runs against the local test store
+// (tekkerDb.LOCAL_MODE) so players understand tokens won here are NOT real
+// rewards yet. The drop announcement gets a dedicated field; win messages get
+// this line appended.
+const TEST_MODE_WIN_NOTICE =
+    '🧪 **TEST MODE** — this was a local test puzzle. This token is a **local test token only**; ' +
+    '**real reward tokens are NOT generated until the website is brought up to date.**';
+const TEST_MODE_DROP_FIELD = {
+    name: '🧪 TEST MODE — practice only',
+    value: 'This puzzle is running on the bot\'s local test store. Any token won here is a **local test token** and will **NOT** become a real reward until the website is brought up to date.',
+};
 
 const CATEGORIES = ["Native", "A.Beast", "Machine", "Dark", "Hit"];
 const EMOJIS = {
@@ -106,7 +119,9 @@ async function announceDrop(drop) {
                              `• **Time Limit**: 2 hours (adds 30m per guess, max 8h)\n\n` +
                              `*First to map all stats claims the reward token!*\n` +
                              `Use \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (divisible by 5, all attributes ≤ 90%)`,
-                color: 0x00ff88 // Vibrant green
+                color: 0x00ff88, // Vibrant green
+                // In local test mode, warn up-front that wins aren't real rewards yet.
+                ...(db.LOCAL_MODE ? { fields: [TEST_MODE_DROP_FIELD] } : {}),
             };
             // Ping the online-players role so in-game hunters get alerted to the drop.
             await channel.send({
@@ -268,6 +283,7 @@ async function processGuess(message, guessArgs) {
                          `*Your token is **saved to your account**. In-game claiming is coming soon — use **\`!tokens\`** to view it, or **\`!gift ${tokenId} @PlayerName\`** to gift it!*`,
             color: 0x00c8ff // Vibrant sky blue
         };
+        if (db.LOCAL_MODE) embed.description += `\n\n${TEST_MODE_WIN_NOTICE}`;
 
         logInfo('TEKKER', `Win: ${message.author.tag} solved stats ${trueStats.join('/')} on attempt ${attemptsUsed}/${maxAttempts} → token ${tokenId}`);
 
@@ -277,18 +293,8 @@ async function processGuess(message, guessArgs) {
             content: `👀 <@${message.author.id}> guessed **right**! 🎉 Solved in ${attemptsUsed}/${maxAttempts} attempts.`,
             embeds: [embed],
             allowedMentions: { parse: [], users: [message.author.id] },
+            flags: [MessageFlags.SuppressNotifications],
         });
-        try {
-            await message.author.send(
-                `🎉 **You won the Tekker Challenge!**\n` +
-                `Here is your reward token: \`${tokenId}\` for a **${MASKED_WEAPON}** with stats **${trueStats.join('/')}**.\n` +
-                `• It is **saved to your account** — in-game claiming is coming soon.\n` +
-                `• Run \`!tokens\` anytime to see your saved tokens.\n` +
-                `• Run \`!gift ${tokenId} @User\` to transfer it to a friend!`
-            );
-        } catch (e) {
-            logWarn('TEKKER', `Could not DM winning token ${tokenId} to ${message.author.tag}: ${e.message}`);
-        }
     } else {
         // Send feedback embed
         const embed = {
@@ -309,20 +315,10 @@ async function processGuess(message, guessArgs) {
             content: `👀 <@${message.author.id}> guessed **wrong** — ${status}.`,
             embeds: [embed],
             allowedMentions: { parse: [], users: [] },
+            flags: [MessageFlags.SuppressNotifications],
         });
         // Tidy the per-guess feedback after the same 5s window as the guess message.
         if (message.guild) setTimeout(() => sent.delete().catch(() => {}), GUESS_TIDY_MS);
-
-        // Also DM the player their hint so it persists after the channel copy is
-        // auto-deleted. Best-effort: a closed DM just means no persistent copy.
-        try {
-            await message.author.send({
-                content: `🔎 **Tekker hint** — your guess \`${guesses.join(' ')}\` (attempt ${attemptsUsed}/${maxAttempts}):`,
-                embeds: [embed],
-            });
-        } catch (e) {
-            logWarn('TEKKER', `Could not DM hint to ${message.author.tag}: ${e.message}`);
-        }
     }
 }
 
@@ -732,6 +728,7 @@ async function processSlashGuess(interaction) {
                          `*Your token is **saved to your account**. Redeem it on https://psobb.io/ or transfer it via \`!gift ${tokenId} @User\`!*`,
             color: 0x00c8ff
         };
+        if (db.LOCAL_MODE) embed.description += `\n\n${TEST_MODE_WIN_NOTICE}`;
 
         logInfo('TEKKER', `Win: ${interaction.user.tag} solved stats ${trueStats.join('/')} → token ${tokenId}`);
 
@@ -745,12 +742,9 @@ async function processSlashGuess(interaction) {
         await interaction.channel.send({
             content: `🏆 <@${interaction.user.id}> solved the Tekker Challenge! 🎉 The item has been claimed.`,
             embeds: [embed],
-            allowedMentions: { parse: [], users: [interaction.user.id] }
+            allowedMentions: { parse: [], users: [interaction.user.id] },
+            flags: [MessageFlags.SuppressNotifications],
         });
-        
-        try {
-            await interaction.user.send(`🎉 **You won the Tekker Challenge!** Token: \`${tokenId}\``);
-        } catch (e) {}
 
     } else {
         // Incorrect guess response
@@ -772,7 +766,8 @@ async function processSlashGuess(interaction) {
         // Public notification showing ONLY the numbers guessed
         const pubMsg = await interaction.channel.send({
             content: `👀 <@${interaction.user.id}> guessed **${guessArgs.join(' ')}** — wrong (${maxAttempts - attemptsRemaining}/${maxAttempts} attempts).`,
-            allowedMentions: { parse: [], users: [] }
+            allowedMentions: { parse: [], users: [] },
+            flags: [MessageFlags.SuppressNotifications],
         });
         phaseMessageIds.push(pubMsg.id);
 

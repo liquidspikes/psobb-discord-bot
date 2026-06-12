@@ -13,6 +13,9 @@ Also exports **`ping()`** — a raw `ping` op (no logging) used by [`healthcheck
 ## Endpoint resolution
 `TEKKER_DB_URL` = `config.tekker_db_url` **or** `config.psobb_api_url` with `bot_api.php` → `bot_tekker_db.php`.
 
+## Local test mode
+When `config.tekker.local_mode` is true (or env `TEKKER_LOCAL_MODE=1`/`true`/`yes`/`on`), `call()` dispatches **synchronously** to [`tekkerLocalStore`](tekkerLocalStore.md) instead of POSTing, and `pingDetailed()` returns `{ok:true}` so the tekker feature stays enabled. This lets the whole `/guess` game (including ops the deployed site lacks) run with **no website**. Exposed as **`LOCAL_MODE`** (boolean) so [`tekkerChallenge`](tekkerChallenge.md) can warn players that won tokens are local test tokens, not real rewards. Default off — production always uses the website.
+
 ## Depends on
 [`config`](config.md), [`actionLog`](actionLog.md), `axios`.
 
