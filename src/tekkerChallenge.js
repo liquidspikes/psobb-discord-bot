@@ -808,7 +808,14 @@ async function processSlashGuess(interaction) {
                 });
                 logInfo('TEKKER', `Syndicate cap shift triggered.`);
             } else {
-                logInfo('TEKKER', `Silent individual cap shift triggered for ${interaction.user.tag}.`);
+                logInfo('TEKKER', `Silent individual cap shift triggered for ${interaction.user.tag} (used all ${maxAttempts} attempts on drop ${drop.drop_id}).`);
+                // This shift is intentionally invisible in real play (anti-collusion).
+                // In test mode, surface it so a tester can confirm the scramble fired.
+                if (db.LOCAL_MODE) {
+                    await interaction.channel.send({
+                        content: `🧪 **TEST MODE:** ${interaction.user.username} used all ${maxAttempts} attempts — the weapon's attributes **silently scrambled** (this notice only shows in test mode; in real play it's hidden).`
+                    });
+                }
             }
         }
     }
