@@ -118,6 +118,7 @@ The model can call these tools against the server API / website:
 - `!restart` — **restarts the bot.** It confirms in-channel, then exits cleanly; the service supervisor relaunches a fresh process within a few seconds. **Requires the process to be supervised with an auto-restart policy** (see [Running as a service](#running-as-a-service)).
 - `!tekker` — Show the current Tekker status (active drop, trigger pool, and threshold).
 - `!tekker roll` (or `!tekker start`) — Force roll a new drop puzzle manually.
+- `!tekker end` (or `!tekker stop` / `!tekker cancel`) — End the active drop early (without rolling a new one) and reveal its hidden stats.
 - `!tekker tokens` — DMs both the outstanding **unclaimed tokens** and the **claimed-rewards** history (who claimed which tokens for what item).
 - `!tekker grant @User <Native> <A.Beast> <Machine> <Dark> <Hit>` — Grant a token with specified stats.
 - `!tekker revoke <token_id>` — Delete a token.

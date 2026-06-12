@@ -79,6 +79,9 @@ A comprehensive list of all player-facing and administrator commands available o
 *   **`!tekker roll`** (alias **`!tekker start`**)
     *   *Usage*: `!tekker roll`
     *   *Purpose*: Force-generates a new active drop puzzle instantly, resetting the trigger pool.
+*   **`!tekker end`** (aliases **`!tekker stop`**, **`!tekker cancel`**)
+    *   *Usage*: `!tekker end`
+    *   *Purpose*: Ends the currently active drop puzzle early without starting a new one, and reveals its hidden stats in the channel.
 *   **`!tekker tokens`** (alias **`!tekker all`**)
     *   *Usage*: `!tekker tokens`
     *   *Purpose*: DMs both the outstanding **unclaimed tokens** (with owners) and the **claimed-rewards** history (who claimed which tokens for what weapon).

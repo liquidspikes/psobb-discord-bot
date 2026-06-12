@@ -490,6 +490,41 @@ async function clearPhaseMessages() {
     phaseMessageIds = [];
 }
 
+// Admin: end the active drop early. Deactivates it, clears the activity tracker
+// and the transient phase messages, and posts a reveal (the stats players missed)
+// to the tekker channel. Returns the ended drop, or null if none was active.
+async function endActiveDrop(endedByName) {
+    const drop = await db.getActiveDrop();
+    if (!drop) return null;
+
+    await db.deactivateDrop(drop.drop_id);
+    await db.clearActiveUsers();
+    await clearPhaseMessages();
+
+    try {
+        const channel = await client.channels.fetch(TEKKER_CHANNEL_ID).catch(() => null);
+        if (channel) {
+            const embed = {
+                title: `🛑 CHALLENGE ENDED 🛑`,
+                description: `An admin${endedByName ? ` (**${endedByName}**)` : ''} ended the **[${MASKED_WEAPON}]** challenge early.\n\n` +
+                             `*Here is what it was:*\n` +
+                             `🗡️ **Native**: ${drop.stat_native}%\n` +
+                             `🐾 **A.Beast**: ${drop.stat_abeast}%\n` +
+                             `🤖 **Machine**: ${drop.stat_machine}%\n` +
+                             `👻 **Dark**: ${drop.stat_dark}%\n` +
+                             `🎯 **Hit**: ${drop.stat_hit}%\n`,
+                color: 0xff4444 // Red
+            };
+            await channel.send({ embeds: [embed] });
+        }
+    } catch (e) {
+        logError('TEKKER', `Failed to post challenge-ended reveal: ${e.message}`);
+    }
+
+    logInfo('TEKKER', `Active drop ${drop.drop_id} ended early${endedByName ? ` by ${endedByName}` : ''}.`);
+    return drop;
+}
+
 async function processSlashGuess(interaction) {
     // Guild-only: booster/member resolution needs a guild, and the game lives in its
     // dedicated channel. (Registration also sets dm_permission:false; this is a guard
@@ -870,5 +905,6 @@ module.exports = {
     isUserLinked,
     MASKED_WEAPON,
     processSlashGuess,
-    startDespawnWatcher
+    startDespawnWatcher,
+    endActiveDrop
 };

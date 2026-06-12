@@ -991,6 +991,7 @@ async function handleHelpCommand(message) {
         '**`!restart`** — *(admin)* Restart the bot process.',
         '**`!tekker`** — Show the current Tekker Challenge status (active drop / trigger pool).',
         '**`!tekker roll`** (alias `!tekker start`) — *(admin)* Manually roll a new Tekker Challenge puzzle now.',
+        '**`!tekker end`** (aliases `!tekker stop` / `!tekker cancel`) — *(admin)* End the active puzzle early and reveal its hidden stats.',
         '**`!tekker tokens`** (alias `!tekker all`) — *(admin)* DM you both the outstanding **unclaimed tokens** and the **claimed-rewards** history (who claimed which tokens for what item).',
         '**`!tekker grant @user N AB M D Hit`** — *(admin)* Mint a token with set stats for a player.',
         '**`!tekker revoke <token_id>`** (alias `!tekker delete`) — *(admin)* Delete a token.',

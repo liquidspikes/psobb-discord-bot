@@ -13,6 +13,7 @@
 | Symbol | Description |
 | --- | --- |
 | `generateDrop()` | Roll + persist a new drop (backend-authoritative); returns `null` if backend is down. |
+| `endActiveDrop(endedByName)` | **Admin end-early** — deactivate the active drop, clear trackers + phase messages, post a stats reveal. Returns the ended drop or `null` if none active. |
 | `announceDrop(drop)` | Post the drop embed to the tekker channel, pinging the online role. |
 | `processSlashGuess(interaction)` | **Live path** — validate + score `/guess`; mint token on win. |
 | `processGuess(message, args)` | **Legacy** prefix-`!guess` scorer; no longer routed (the `!guess` command now just redirects to `/guess`). |

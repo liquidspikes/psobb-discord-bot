@@ -27,7 +27,7 @@
 [`messageHandler`](messageHandler.md) — `commands.dispatch(message)` is the only call site.
 
 ## Registered commands (in order)
-`!health` · `/guess`,`!guess` (redirect to slash) · `!claim` · `!gift` · `!trade` · `!tokens` · `!tekker*` (status/`roll`/`tokens`|`all`/`grant`/`revoke`/`give`/`threshold`) · `!quest`/`$quest` (deprecated) · `!log` · `!interactions` · `!restart` · `!pull`/`!gitpull`/`!update` · `!clear`/`!purge` · `!roles` · `!channels` · `!commands`/`!help` · `!lock`/`!unlock` · `!nickname`/`!nick` · `!sync all` (before `!sync`) · `!notify` · `!sync` · passthrough: `!stats`/`!quests`/`!progress`/`!progression`.
+`!health` · `/guess`,`!guess` (redirect to slash) · `!claim` · `!gift` · `!trade` · `!tokens` · `!tekker*` (status/`roll`/`end`|`stop`|`cancel`/`tokens`|`all`/`grant`/`revoke`/`give`/`threshold`) · `!quest`/`$quest` (deprecated) · `!log` · `!interactions` · `!restart` · `!pull`/`!gitpull`/`!update` · `!clear`/`!purge` · `!roles` · `!channels` · `!commands`/`!help` · `!lock`/`!unlock` · `!nickname`/`!nick` · `!sync all` (before `!sync`) · `!notify` · `!sync` · passthrough: `!stats`/`!quests`/`!progress`/`!progression`.
 
 `!notify <DM|LFG|VC> <on|off>` reads/writes [`notificationPrefs`](notificationPrefs.md) (the `/notify` slash form is handled in [`messageHandler`](messageHandler.md)). With no args it prints the caller's current per-type push settings.
 

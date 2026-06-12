@@ -260,6 +260,17 @@ register({
             await announceDrop(drop);
             logInfo('TEKKER', `Manual drop rolled by admin ${message.author.tag}: stats ${drop.stat_native}/${drop.stat_abeast}/${drop.stat_machine}/${drop.stat_dark}/${drop.stat_hit}, hint ${drop.hint_attribute}=0%.`);
             return await message.reply(`🚨 **New Tekker Challenge puzzle rolled manually by admin!**`);
+        } else if (sub === 'end' || sub === 'stop' || sub === 'cancel') {
+            if (!message.member || !message.member.permissions.has('Administrator')) {
+                return await message.reply('🔒 `!tekker end` is for server admins only.');
+            }
+            const { endActiveDrop } = require('./tekkerChallenge');
+            const ended = await endActiveDrop(message.author.username);
+            if (!ended) {
+                return await message.reply('ℹ️ There is no active Tekker Challenge to end right now.');
+            }
+            logInfo('TEKKER', `Admin ${message.author.tag} ended drop ${ended.drop_id} early.`);
+            return await message.reply('🛑 **Ended the active Tekker Challenge.** The hidden stats have been revealed in the channel.');
         } else if (sub === 'tokens' || sub === 'all') {
             // Admin oversight. Two distinct stores now: outstanding tokens still live
             // in tekker_tokens (claimed ones are DELETED on redemption), while the
