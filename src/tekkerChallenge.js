@@ -798,25 +798,22 @@ async function processSlashGuess(interaction) {
         }
 
         if (syndicateShift || individualShift) {
-            // Delete all phase messages
+            // Clear the transient per-guess phase messages FIRST, then post the
+            // scramble notice AFTER. The notice is intentionally NOT tracked in
+            // phaseMessageIds, so it persists in the channel (later shifts/wins/
+            // despawns only clear the per-guess messages, never this announcement).
             await clearPhaseMessages();
 
-            if (syndicateShift) {
-                // Public instability notice
-                await interaction.channel.send({
-                    content: `⚠️ **Instability Detected:** The weapon's attributes have shifted!`
-                });
-                logInfo('TEKKER', `Syndicate cap shift triggered.`);
-            } else {
-                logInfo('TEKKER', `Silent individual cap shift triggered for ${interaction.user.tag} (used all ${maxAttempts} attempts on drop ${drop.drop_id}).`);
-                // This shift is intentionally invisible in real play (anti-collusion).
-                // In test mode, surface it so a tester can confirm the scramble fired.
-                if (db.LOCAL_MODE) {
-                    await interaction.channel.send({
-                        content: `🧪 **TEST MODE:** ${interaction.user.username} used all ${maxAttempts} attempts — the weapon's attributes **silently scrambled** (this notice only shows in test mode; in real play it's hidden).`
-                    });
-                }
-            }
+            const trigger = syndicateShift
+                ? `the syndicate's combined guessing`
+                : `**${interaction.user.username}** using all ${maxAttempts} of their attempts`;
+            await interaction.channel.send({
+                content: `⚠️ **Instability Detected!** The **${MASKED_WEAPON}**'s hidden attributes have **scrambled** — triggered by ${trigger}. Any Higher/Lower notes may now be stale. Keep guessing!`,
+                allowedMentions: { parse: [], users: [] },
+            });
+            logInfo('TEKKER', syndicateShift
+                ? `Syndicate cap shift triggered (drop ${drop.drop_id}).`
+                : `Individual cap shift triggered by ${interaction.user.tag} — used all ${maxAttempts} attempts (drop ${drop.drop_id}).`);
         }
     }
 }
