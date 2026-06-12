@@ -1026,7 +1026,15 @@ async function handleHelpCommand(message) {
         }
     }
 
-    return await message.reply(reply);
+    // The assembled player list can exceed Discord's 2000-char cap, which would
+    // make message.reply() throw and drop the whole public message — chunk it on
+    // line boundaries (reply with the first, follow up with the rest).
+    const replyChunks = splitForDm(reply);
+    await message.reply(replyChunks[0]);
+    for (let i = 1; i < replyChunks.length; i++) {
+        await message.channel.send(replyChunks[i]);
+    }
+    return;
 }
 
 // =====================================================================

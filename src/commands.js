@@ -244,6 +244,15 @@ register({
             const { generateDrop, announceDrop } = require('./tekkerChallenge');
             await db.clearActiveUsers();
             const drop = await generateDrop();
+            // generateDrop returns null when the storage backend can't create the
+            // drop (e.g. the live website endpoint is out of date). Surface that to
+            // the admin instead of throwing on a null drop and replying nothing.
+            if (!drop) {
+                return await message.reply(
+                    '⚠️ **Could not start a puzzle.** The Tekker storage backend rejected the new drop — the live website `bot_tekker_db.php` endpoint is likely out of date. ' +
+                    'Run `!health` to check, deploy the website update, or start the bot with `TEKKER_LOCAL_MODE=1` to play against the local test store.'
+                );
+            }
             await announceDrop(drop);
             logInfo('TEKKER', `Manual drop rolled by admin ${message.author.tag}: stats ${drop.stat_native}/${drop.stat_abeast}/${drop.stat_machine}/${drop.stat_dark}/${drop.stat_hit}, hint ${drop.hint_attribute}=0%.`);
             return await message.reply(`🚨 **New Tekker Challenge puzzle rolled manually by admin!**`);
