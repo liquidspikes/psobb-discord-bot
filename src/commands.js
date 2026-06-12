@@ -79,10 +79,13 @@ register({
 register({
     name: 'guess', prefixes: ['/', '!'], audience: 'member',
     run: async (message) => {
-        logInfo('COMMAND', `guess by ${message.author.tag} (${message.author.id})`);
-        const args = message.content.replace(/^[\/!]guess\s*/i, '').trim().split(/\s+/);
-        const { processGuess } = require('./tekkerChallenge');
-        return await processGuess(message, args);
+        const reply = await message.reply("🎮 The text-based guess command has been upgraded! Please type and use the slash command **/guess** instead.");
+        if (message.guild) {
+            setTimeout(() => {
+                message.delete().catch(() => {});
+                reply.delete().catch(() => {});
+            }, 5000);
+        }
     },
 });
 

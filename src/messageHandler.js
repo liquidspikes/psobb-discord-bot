@@ -45,6 +45,31 @@ function registerMessageHandlers() {
             }
         } catch (e) {}
     });
+    client.on(Events.InteractionCreate, async (interaction) => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.commandName === 'guess') {
+            try {
+                if (isFeatureUp('tekker')) {
+                    const { processSlashGuess } = require('./tekkerChallenge');
+                    await processSlashGuess(interaction);
+                } else {
+                    await interaction.reply({ content: '⚠️ The Tekker Challenge feature is currently down/unavailable.', ephemeral: true });
+                }
+            } catch (e) {
+                console.error("[SLASH GUESS ERROR]", e);
+                try {
+                    const msg = '⚠️ An error occurred while processing your guess.';
+                    // processSlashGuess defers early, so by the time most errors fire the
+                    // interaction is already deferred — edit it rather than reply.
+                    if (interaction.deferred || interaction.replied) {
+                        await interaction.editReply({ content: msg });
+                    } else {
+                        await interaction.reply({ content: msg, ephemeral: true });
+                    }
+                } catch (replyErr) {}
+            }
+        }
+    });
 
     client.on(Events.MessageCreate, async (message) => {
         if (!message || message.system || handledMessages.has(message.id)) return;

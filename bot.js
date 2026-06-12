@@ -22,8 +22,31 @@ client.once(Events.ClientReady, async (c) => {
     // Initialize SQLite Tekker Database
     try {
         await initDb();
+        // Register the slash command globally
+        // NOTE: set() replaces the ENTIRE global command list — any future global
+        // slash command must be added to this array too, or it will be removed.
+        await c.application.commands.set([
+            {
+                name: 'guess',
+                description: 'Guess the attributes of the active special weapon',
+                dm_permission: false, // guild-only: the game needs a guild + its channel
+                options: [
+                    { name: 'native', type: 4, description: 'Native attribute percentage', required: true },
+                    { name: 'abeast', type: 4, description: 'A.Beast attribute percentage', required: true },
+                    { name: 'machine', type: 4, description: 'Machine attribute percentage', required: true },
+                    { name: 'dark', type: 4, description: 'Dark attribute percentage', required: true },
+                    { name: 'hit', type: 4, description: 'Hit attribute percentage', required: true },
+                ]
+            }
+        ]);
+        logInfo('SYSTEM', 'Registered global slash commands.');
+        
+        if (isFeatureUp('tekker')) {
+            const { startDespawnWatcher } = require('./src/tekkerChallenge');
+            startDespawnWatcher();
+        }
     } catch (e) {
-        logError('SYSTEM', `Failed to initialize tekker database: ${e.message}`);
+        logError('SYSTEM', `Failed to initialize tekker database / commands: ${e.message}`);
     }
 
     // Boot-time integrity gate: catch a stale/partial deploy (e.g. the running

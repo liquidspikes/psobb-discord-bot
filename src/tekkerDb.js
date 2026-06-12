@@ -106,11 +106,15 @@ async function pingDetailed() {
 const getActiveDrop = () => call('getActiveDrop');
 const createDrop = (drop) => call('createDrop', drop);
 const deactivateDrop = (dropId) => call('deactivateDrop', { dropId });
+const shiftActiveDropStats = (dropId) => call('shiftActiveDropStats', { dropId });
+const incrementDropGuesses = (dropId) => call('incrementDropGuesses', { dropId });
+const discoverSecondZero = (dropId) => call('discoverSecondZero', { dropId });
+const pulseDespawnTime = (dropId) => call('pulseDespawnTime', { dropId });
 
 // Player attempts
 const getPlayerState = (userId, dropId) => call('getPlayerState', { userId, dropId });
-const upsertPlayerState = (userId, dropId, attemptsUsed, maxAttempts) =>
-    call('upsertPlayerState', { userId, dropId, attemptsUsed, maxAttempts });
+const upsertPlayerState = (userId, dropId, attemptsUsed, maxAttempts, lifetimeAttempts, attemptsRemaining, lastGuessAt) =>
+    call('upsertPlayerState', { userId, dropId, attemptsUsed, maxAttempts, lifetimeAttempts, attemptsRemaining, lastGuessAt });
 
 // Telemetry
 const addTelemetryLog = (userId, dropId, guessArray, resultState) =>
@@ -141,6 +145,10 @@ module.exports = {
     getActiveDrop,
     createDrop,
     deactivateDrop,
+    shiftActiveDropStats,
+    incrementDropGuesses,
+    discoverSecondZero,
+    pulseDespawnTime,
     getPlayerState,
     upsertPlayerState,
     addTelemetryLog,
