@@ -49,6 +49,21 @@ let activeLock = {
 };
 let phaseMessageIds = [];
 
+// Per-drop list of /guess slash interactions whose (ephemeral) result messages
+// we delete when the game ends (win / !tekker end / despawn). Ephemerals aren't
+// real channel messages, so this is the only way to clear them — and Discord
+// only allows it within ~15 min of each interaction, so older ones are skipped.
+// Reset when a new drop is announced.
+let guessInteractions = [];
+
+// Delete every tracked /guess ephemeral result (best-effort, in parallel) and
+// reset the list. Tokens older than ~15 min just fail and are skipped.
+async function clearGuessEphemerals() {
+    const list = guessInteractions;
+    guessInteractions = [];
+    await Promise.allSettled(list.map((it) => it.deleteReply().catch(() => {})));
+}
+
 // Target role ID for Server Boosters
 const BOOSTER_ROLE_ID = '1500893249861324832';
 
@@ -158,6 +173,7 @@ async function announceDrop(drop) {
             // posting the new drop, so the previous game's messages don't linger.
             await clearChannelExcept(channel, KEEP_MESSAGE_ID);
             phaseMessageIds = []; // any tracked transient ids are gone now
+            guessInteractions = []; // fresh game — start tracking guess ephemerals anew
             const embed = {
                 title: `🚨 SPECIAL WEAPON DROP: [${MASKED_WEAPON}] 🚨`,
                 description: `Scanner indicates **${EMOJIS[drop.hint_attribute]} ${drop.hint_attribute}** is **0%**.\n\n` +
@@ -547,6 +563,7 @@ async function endActiveDrop(endedByName) {
     await db.deactivateDrop(drop.drop_id);
     await db.clearActiveUsers();
     await clearPhaseMessages();
+    await clearGuessEphemerals();
 
     try {
         const channel = await client.channels.fetch(TEKKER_CHANNEL_ID).catch(() => null);
@@ -813,19 +830,20 @@ async function processSlashGuess(interaction) {
 
         logInfo('TEKKER', `Win: ${interaction.user.tag} solved stats ${trueStats.join('/')} → token ${tokenId}`);
 
-        // Ephemeral success to winner
-        await interaction.editReply({
-            content: `🎉 You got the exact match!`,
-            embeds: [embed]
-        });
-
-        // Public victory broadcast
+        // Public victory broadcast — the ONLY win message (no ephemeral copy).
         await interaction.channel.send({
             content: `🏆 <@${interaction.user.id}> solved the Tekker Challenge! 🎉 The item has been claimed.`,
             embeds: [embed],
             allowedMentions: { parse: [], users: [interaction.user.id] },
             flags: [MessageFlags.SuppressNotifications],
         });
+
+        // We had to defer (ephemeral) before scoring; remove that deferred reply so
+        // the winner doesn't also get a private ephemeral copy of the win.
+        await interaction.deleteReply().catch(() => {});
+
+        // Game over: delete every player's tracked /guess result ephemeral.
+        await clearGuessEphemerals();
 
     } else {
         // Incorrect guess response
@@ -843,6 +861,8 @@ async function processSlashGuess(interaction) {
             content: `🔎 **Tekker Challenge evaluation results:**`,
             embeds: [embed]
         });
+        // Track this interaction so its ephemeral can be cleared when the game ends.
+        guessInteractions.push(interaction);
 
         // Public notification showing ONLY the numbers guessed
         const pubMsg = await interaction.channel.send({
@@ -916,7 +936,8 @@ function startDespawnWatcher() {
                 await db.deactivateDrop(drop.drop_id);
                 await db.clearActiveUsers();
                 await clearPhaseMessages();
-                
+                await clearGuessEphemerals();
+
                 const channel = await client.channels.fetch(TEKKER_CHANNEL_ID).catch(() => null);
                 if (channel) {
                     const embed = {
