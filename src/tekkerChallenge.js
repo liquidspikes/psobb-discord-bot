@@ -708,17 +708,16 @@ async function processSlashGuess(interaction) {
                 lines.push(`${emoji} **${cat}**: ${gVal}% ✅ *(Correct)*`);
             }
         } else {
-            const isHiddenZero = (cat === hiddenSecondZero && !secondZeroDiscovered);
-            if (isHiddenZero && gVal > 0) {
+            // The hidden second zero now gives normal directional feedback: a guess
+            // above 0 shows "Lower" like any other attribute (it's no longer masked
+            // as "Incorrect"). Guessing 0 on a genuinely non-zero attribute still
+            // shows "Incorrect" so 0-probes can't map out which attributes are zero.
+            if (gVal === 0 && tVal > 0) {
                 lines.push(`${emoji} **${cat}**: ${gVal}% ❌ *(Incorrect)*`);
-            } else if (gVal === 0 && tVal > 0) {
-                lines.push(`${emoji} **${cat}**: ${gVal}% ❌ *(Incorrect)*`);
+            } else if (gVal < tVal) {
+                lines.push(`${emoji} **${cat}**: ${gVal}% 🔼 *(Higher)*`);
             } else {
-                if (gVal < tVal) {
-                    lines.push(`${emoji} **${cat}**: ${gVal}% 🔼 *(Higher)*`);
-                } else {
-                    lines.push(`${emoji} **${cat}**: ${gVal}% 🔽 *(Lower)*`);
-                }
+                lines.push(`${emoji} **${cat}**: ${gVal}% 🔽 *(Lower)*`);
             }
         }
     }
