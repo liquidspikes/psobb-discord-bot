@@ -24,6 +24,8 @@
 - `tekker_db_url` (override), `tekker.claim_enabled`, `tekker.channel_id` / `tekker_channel_id`
 - `tekker.local_mode` (bool) — force all Tekker ops to the in-process [`tekkerLocalStore`](tekkerLocalStore.md) instead of the website (test mode). Also settable via env `TEKKER_LOCAL_MODE=1`. Default off.
 - `tekker.auto_local_fallback` (bool, **default on**) — at boot, if the live `bot_tekker_db.php` endpoint is unreachable or out of date (capability probe fails), auto-switch to the local store for the session instead of leaving the game broken. Set `false` to keep strict graceful-degradation instead.
+- `tekker.channel_id` / top-level `tekker_channel_id` — the dedicated Tekker channel.
+- `tekker.keep_message_id` — the single message preserved when the channel is wiped at the start of each game (e.g. a pinned rules/info post). Falls back to a hard-coded id. Requires the bot to have **Manage Messages** in the channel.
 
 ## Depended on by
 Essentially every module. Changing a path or key here ripples everywhere.

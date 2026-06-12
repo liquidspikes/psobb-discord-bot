@@ -36,6 +36,7 @@
 
 ## Key behaviors / gotchas
 - **Channel-confined:** drops announce in, and guesses are only accepted in, the tekker channel (`tekker.channel_id`, fallback id hard-coded).
+- **Channel wiped at game start:** `announceDrop` calls `clearChannelExcept(channel, KEEP_MESSAGE_ID)` before posting, deleting every message in the tekker channel except `tekker.keep_message_id` (the pinned info post). Uses `bulkDelete` (<14-day messages) + individual deletes for older ones; needs **Manage Messages**. `phaseMessageIds` is reset afterward.
 - **Attempts:** 5 base / **8 boosters** (`BOOSTER_ROLE_ID` is hard-coded, no config override — see `CODE_REVIEW_REPORT.md` risk #4). The slash path also **lazily regenerates 1 attempt/hour** since the last guess.
 - **Stat legality** — every attribute, **Hit included**, is *divisible by 5 and 0–90%*. This mirrors the backend roll (`base` 15–80 + `±10` variance ⇒ hard ceiling 90; the PHP `min(100,…)` is a harmless over-clamp). The slash `/guess` options also set `min_value:0`/`max_value:90` so Discord rejects out-of-range input client-side. Enforced consistently in `processSlashGuess`, the legacy `processGuess`, and `adminGrantToken`.
 - **Drop mechanics (slash path):**

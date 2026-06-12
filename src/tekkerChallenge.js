@@ -65,6 +65,13 @@ const ONLINE_ROLE_ID = String(
     (config.role_sync || {}).online_role_id || '1513735102759440424'
 );
 
+// At the START of each game the tekker channel is wiped clean except for this
+// ONE message (e.g. a pinned rules/info post). Configurable via
+// tekker.keep_message_id; falls back to the known pinned message.
+const KEEP_MESSAGE_ID = String(
+    (config.tekker || {}).keep_message_id || '1514911615839899770'
+);
+
 // Check if a Discord User ID is linked to the website database
 function isUserLinked(userId) {
     const rosterPath = path.join(MEMORY_DIR, 'linked_roster.json');
@@ -106,11 +113,51 @@ async function generateDrop() {
     return created;
 }
 
+// Wipe every message in the tekker channel except `keepId`, so each new game
+// starts on a clean slate. Uses bulkDelete for messages < 14 days old (one API
+// call per 100) and falls back to individual deletes for older ones. Requires
+// the bot to have Manage Messages in the channel. Best-effort; logs on failure.
+async function clearChannelExcept(channel, keepId) {
+    let removed = 0;
+    try {
+        for (let i = 0; i < 12; i++) { // cap passes to avoid runaway on a huge channel
+            const batch = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+            if (!batch || batch.size === 0) break;
+            const deletable = batch.filter(m => m.id !== keepId);
+            if (deletable.size === 0) break;
+
+            const bulk = await channel.bulkDelete(deletable, true).catch(() => null);
+            const bulkCount = bulk ? bulk.size : 0;
+            removed += bulkCount;
+
+            // bulkDelete silently skips messages older than 14 days — sweep those one by one.
+            const leftover = bulk ? deletable.filter(m => !bulk.has(m.id)) : deletable;
+            let individual = 0;
+            for (const m of leftover.values()) {
+                if (await m.delete().then(() => true).catch(() => false)) individual++;
+            }
+            removed += individual;
+
+            // No progress this pass (everything left is undeletable — perms/age) — stop.
+            if (bulkCount + individual === 0) break;
+            if (batch.size < 100) break;
+        }
+    } catch (e) {
+        logError('TEKKER', `Failed to clear tekker channel for new game: ${e.message}`);
+    }
+    if (removed) logInfo('TEKKER', `Cleared ${removed} message(s) from the tekker channel for the new game (kept ${keepId}).`);
+    return removed;
+}
+
 // Broadcast drop announcement embed to the configured channel
 async function announceDrop(drop) {
     try {
         const channel = await client.channels.fetch(TEKKER_CHANNEL_ID).catch(() => null);
         if (channel) {
+            // Fresh slate: wipe the channel (keeping the pinned info message) BEFORE
+            // posting the new drop, so the previous game's messages don't linger.
+            await clearChannelExcept(channel, KEEP_MESSAGE_ID);
+            phaseMessageIds = []; // any tracked transient ids are gone now
             const embed = {
                 title: `🚨 SPECIAL WEAPON DROP: [${MASKED_WEAPON}] 🚨`,
                 description: `Scanner indicates **${EMOJIS[drop.hint_attribute]} ${drop.hint_attribute}** is **0%**.\n\n` +
