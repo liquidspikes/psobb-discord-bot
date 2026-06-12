@@ -79,7 +79,11 @@ register({
 register({
     name: 'guess', prefixes: ['/', '!'], audience: 'member',
     run: async (message) => {
-        const reply = await message.reply("🎮 The text-based guess command has been upgraded! Please type and use the slash command **/guess** instead.");
+        const reply = await message.reply(
+            "🎮 **Don't type that as a message — use the `/guess` slash command.**\n" +
+            "Type `/` in the message box and **pick `guess` from the popup menu**, then fill in the five numbers (Native · A.Beast · Machine · Dark · Hit). That sends the real command so I can score it.\n" +
+            "*If `/guess` doesn't appear in the popup, it may still be syncing (global commands can take a little while), and note it only works in the server — not in DMs.*"
+        );
         if (message.guild) {
             setTimeout(() => {
                 message.delete().catch(() => {});
