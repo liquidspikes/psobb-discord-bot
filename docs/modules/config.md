@@ -22,7 +22,8 @@
 - `lfg_sync.{enabled,channel_id,interval_seconds}` / `lfg_channel_id`
 - `party_rooms.{enabled,category_id,community_support_role,interval_seconds,grace_seconds,min_linked}`
 - `tekker_db_url` (override), `tekker.claim_enabled`, `tekker.channel_id` / `tekker_channel_id`
-- `tekker.local_mode` (bool) — route all Tekker ops to the in-process [`tekkerLocalStore`](tekkerLocalStore.md) instead of the website (test mode). Also settable via env `TEKKER_LOCAL_MODE=1`. Default off.
+- `tekker.local_mode` (bool) — force all Tekker ops to the in-process [`tekkerLocalStore`](tekkerLocalStore.md) instead of the website (test mode). Also settable via env `TEKKER_LOCAL_MODE=1`. Default off.
+- `tekker.auto_local_fallback` (bool, **default on**) — at boot, if the live `bot_tekker_db.php` endpoint is unreachable or out of date (capability probe fails), auto-switch to the local store for the session instead of leaving the game broken. Set `false` to keep strict graceful-degradation instead.
 
 ## Depended on by
 Essentially every module. Changing a path or key here ripples everywhere.

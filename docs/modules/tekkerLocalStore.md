@@ -3,7 +3,7 @@
 > An in-process JS port of every `bot_tekker_db.php` op, backed by a JSON file. Lets the **full Tekker game run with no website** — for testing the `/guess` mechanics + token lifecycle before the website PR that adds the new ops is merged & deployed.
 
 ## When it's used
-Only when [`tekkerDb`](tekkerDb.md) is in **local mode** — `config.tekker.local_mode: true` **or** env `TEKKER_LOCAL_MODE=1` (`true`/`yes`/`on` also accepted). **Default off**: production always talks to the website endpoint. In local mode `tekkerDb.call()` dispatches here synchronously and the health probe (`pingDetailed`) reports the feature as up.
+Only when [`tekkerDb`](tekkerDb.md) is in **local mode**, which turns on either **explicitly** (`config.tekker.local_mode: true` / env `TEKKER_LOCAL_MODE=1`) or via **auto-fallback** — at boot `tekkerDb` runs a capability probe and, if the live endpoint is unreachable or out of date, flips to this store for the session (default on; `config.tekker.auto_local_fallback: false` to disable). **Default off** otherwise: a healthy, up-to-date website always uses the live endpoint. In local mode `tekkerDb.call()` dispatches here synchronously and the health probe (`pingDetailed`) reports the feature as up.
 
 ## Storage
 - `MEMORY_DIR/tekker_local.json` — `{ seq, drops[], playerState[], telemetry[], activeUsers[], settings{}, tokens[], claimLog[] }`. Loaded once, rewritten after every mutating op. Delete the file to reset the test world.

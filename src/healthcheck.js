@@ -168,7 +168,10 @@ function detailedReport() {
     for (const [k, d] of Object.entries(DEPENDENCIES)) {
         const s = depStatus[k];
         if (!s) { out += `• ⏳ ${d.label} — not checked yet\n`; continue; }
-        out += `• ${s.ok ? '✅' : '❌'} ${d.label}${!s.ok && s.detail ? ` — ${s.detail}` : ''}\n`;
+        // Flag when Tekker is being served by the local test store (auto-fallback
+        // or explicit) so an admin isn't misled into thinking the website is live.
+        const localTag = (k === 'tekker_db' && tekkerDb.LOCAL_MODE) ? ' — ⚠️ LOCAL test store (auto-fallback; tokens are not real until the website is updated)' : '';
+        out += `• ${s.ok ? '✅' : '❌'} ${d.label}${!s.ok && s.detail ? ` — ${s.detail}` : ''}${localTag}\n`;
     }
     out += '\n**Features**\n';
     for (const [fk, f] of Object.entries(FEATURES)) {
