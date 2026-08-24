@@ -1,3 +1,9 @@
+// Force IPv4 preference globally in Node.js to bypass broken IPv6 routing on this server.
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+}
+
 // Entry point for the PSOBB Discord bot.
 // All logic lives in ./src/* modules; this file just wires events and logs in.
 const { Events, ChannelType } = require('discord.js');
