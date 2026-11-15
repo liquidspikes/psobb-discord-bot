@@ -116,7 +116,7 @@ const toolHandlers = {
             text = text.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gmi, "");
             text = text.replace(/<[^>]*>?/gm, ' ');
             text = text.replace(/\s+/g, ' ').trim();
-            return text.substring(0, 8000);
+            return text.substring(0, 4000);
         } catch (e) { return { error: "Failed to read website: " + e.message }; }
     },
     update_social_memory: async (args) => {
@@ -301,8 +301,8 @@ const toolHandlers = {
                 return true;
             });
 
-            // Limit results to 40 items to avoid overwhelming Gemini context
-            const limit = 40;
+            // Limit results to 25 items to avoid overwhelming Gemini context and conserve free tier tokens
+            const limit = 25;
             const results = filtered.slice(0, limit);
 
             return {

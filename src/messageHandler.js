@@ -5,7 +5,7 @@ const path = require('path');
 const { Events } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { client } = require('./discordClient');
-const { model } = require('./model');
+const { model, getModel, candidateModelNames } = require('./model');
 const { toolHandlers } = require('./tools');
 const { loadSocialMemory } = require('./socialMemory');
 const { getCurrentPlayerSession } = require('./session');
@@ -14,6 +14,25 @@ const { isFeatureUp, featureForTool, toolDownResult } = require('./healthcheck')
 const commands = require('./commands');
 
 const handledMessages = new Set();
+
+async function safeReply(message, options) {
+    try {
+        return await message.reply(options);
+    } catch (err) {
+        // If message was deleted or reference is unknown (code 50035 or 10008 or message_reference error)
+        if (err.code === 50035 || err.code === 10008 || (err.message && err.message.includes('message_reference'))) {
+            try {
+                if (message.channel && typeof message.channel.send === 'function') {
+                    return await message.channel.send(options);
+                }
+            } catch (chanErr) {
+                console.error('[SAFE_REPLY] Fallback channel send failed:', chanErr.message);
+            }
+        } else {
+            console.error('[SAFE_REPLY] Reply failed:', err.message);
+        }
+    }
+}
 
 function registerMessageHandlers() {
     client.on("raw", async (packet) => {
@@ -203,8 +222,6 @@ function registerMessageHandlers() {
                 }
             }
 
-            const chat = model.startChat({ history: validHistory });
-
             let userMsg = `[${message.author.username} (ID: ${message.author.id})]: ${message.content}`;
 
             let session = null;
@@ -245,40 +262,79 @@ function registerMessageHandlers() {
 
             userMsg = `${contextStr}\n${userMsg}`;
 
-            let result = await chat.sendMessage(userMsg);
-            let response = result.response;
+            let responseText = null;
+            let lastError = null;
 
-            let toolIteration = 0;
-            while (response.functionCalls() && toolIteration < 5) {
-                toolIteration++;
-                const toolResults = [];
-                for (const call of response.functionCalls()) {
-                    logInfo('TOOL', `${call.name}(${JSON.stringify(call.args)}) for ${message.author.tag}`);
-                    // If this tool's feature was disabled by the startup health check,
-                    // return an error the model relays to the user instead of calling
-                    // a handler that hits a missing/broken website endpoint.
-                    const gatedFeature = featureForTool(call.name);
-                    let data;
-                    if (gatedFeature && !isFeatureUp(gatedFeature)) {
-                        data = toolDownResult(call.name);
-                        logWarn('TOOL', `Skipped ${call.name} — feature "${gatedFeature}" disabled by failed health check.`);
-                    } else {
-                        const handler = toolHandlers[call.name];
-                        data = handler ? await handler(call.args) : { error: "Tool not found" };
-                        if (!handler) logWarn('TOOL', `Unknown tool requested: ${call.name}`);
-                    }
-                    toolResults.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: { content: data }
+            for (const modelName of candidateModelNames) {
+                let modelSuccess = false;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        const modelInstance = getModel(modelName);
+                        const chat = modelInstance.startChat({ history: validHistory });
+
+                        let result = await chat.sendMessage(userMsg);
+                        let response = result.response;
+
+                        let toolIteration = 0;
+                        while (response.functionCalls() && toolIteration < 5) {
+                            toolIteration++;
+                            const toolResults = [];
+                            for (const call of response.functionCalls()) {
+                                logInfo('TOOL', `${call.name}(${JSON.stringify(call.args)}) [${modelName}] for ${message.author.tag}`);
+                                // If this tool's feature was disabled by the startup health check,
+                                // return an error the model relays to the user instead of calling
+                                // a handler that hits a missing/broken website endpoint.
+                                const gatedFeature = featureForTool(call.name);
+                                let data;
+                                if (gatedFeature && !isFeatureUp(gatedFeature)) {
+                                    data = toolDownResult(call.name);
+                                    logWarn('TOOL', `Skipped ${call.name} — feature "${gatedFeature}" disabled by failed health check.`);
+                                } else {
+                                    const handler = toolHandlers[call.name];
+                                    data = handler ? await handler(call.args) : { error: "Tool not found" };
+                                    if (!handler) logWarn('TOOL', `Unknown tool requested: ${call.name}`);
+                                }
+
+                                // Cap tool result size to protect token limits
+                                let safeContent = data;
+                                if (typeof safeContent === 'string' && safeContent.length > 5000) {
+                                    safeContent = safeContent.slice(0, 5000) + '... [truncated]';
+                                }
+
+                                toolResults.push({
+                                    functionResponse: {
+                                        name: call.name,
+                                        response: { content: safeContent }
+                                    }
+                                });
+                            }
+                            result = await chat.sendMessage(toolResults);
+                            response = result.response;
                         }
-                    });
+
+                        responseText = response.text();
+                        modelSuccess = true;
+                        break;
+                    } catch (err) {
+                        lastError = err;
+                        const status = err.status || (err.message && err.message.match(/\[(\d{3})\]/)?.[1]);
+                        const isTransient = status == 503 || status == 429 || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || (err.message && err.message.includes('fetch failed'));
+
+                        logWarn('AI', `Model ${modelName} attempt ${attempt} failed: ${err.message}`);
+                        if (attempt < 2 && isTransient) {
+                            await new Promise(r => setTimeout(r, 1500));
+                        } else {
+                            break;
+                        }
+                    }
                 }
-                result = await chat.sendMessage(toolResults);
-                response = result.response;
+                if (modelSuccess && responseText) break;
             }
 
-            const responseText = response.text();
+            if (!responseText) {
+                throw lastError || new Error("All AI models failed to respond");
+            }
+
             const splitText = (text, maxLength) => {
                 if (text.length <= maxLength) return [text];
                 const chunks = [];
@@ -296,13 +352,13 @@ function registerMessageHandlers() {
 
             if (responseText.length > 2000) {
                 const chunks = splitText(responseText, 1950);
-                for (const chunk of chunks) await message.reply(chunk);
+                for (const chunk of chunks) await safeReply(message, chunk);
             } else if (responseText.trim()) {
-                await message.reply(responseText);
+                await safeReply(message, responseText);
             }
         } catch (e) {
             console.error("[AI ERROR]", e.message);
-            await message.reply("📡 **Communication Interrupted:** Pioneer 2's link is experiencing interference.");
+            await safeReply(message, "📡 **Communication Interrupted:** Pioneer 2's link is experiencing interference.");
         }
     });
 }

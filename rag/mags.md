@@ -40,6 +40,13 @@ Evolution depends on the **Class**, **Gender**, and **Section ID** of the charac
   - Stats: DEF + DEX = POW + MIND.
   - Triggers: Invincibility at 100% PB and 10% HP. Highly prized.
 
+## Cell Mags & Mag Evolution Kits
+- Special "Cell Mags" (like **Liberta**, **Chu Chu**, **RoboChao**, **Nidra**, **Mark3**, **Sega Saturn**, **Puyo**) require specific Mag Cell / Kit items (e.g. **Liberta Kit**, **Amities Memo**, **Pioneer Parts**, **D-Photon Core**).
+- **Where to get Mag Cells on PSOBB.IO:** 
+  - Mag Cells do **NOT** drop from monsters/boxes.
+  - They are obtained through high-tier **Hunter's Guild Bounties** (`https://psobb.io/missions`) and **Level Milestone Rewards** (`https://psobb.io/`) from the Random category pool (e.g. **Liberta Kit** is a Tier 9/10 reward for Level 120+ Hunters).
+  - See `mag_cells_and_evolution_kits.md` for the complete list and stat requirements.
+
 ## Photon Blasts (PB)
 - **Mylla & Youlla (M&Y):** The most important PB. Provides Shifta & Deband buffs.
 - **Estlla:** High damage line attack.
@@ -51,4 +58,3 @@ Evolution depends on the **Class**, **Gender**, and **Section ID** of the charac
 ## Pro Tips
 - Use a **Level 10-50 Calculator** to ensure you get the right Photon Blasts.
 - To change a Mag's 3rd evolution, give it to a character with a different Class/ID and feed it until it reaches a level divisible by 5 (e.g., Level 55, 60).
-- Special "Cell Mags" (like **Chu Chu**, **RoboChao**, **Nidra**) require specific items and stat conditions.
