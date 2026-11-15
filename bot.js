@@ -4,6 +4,25 @@ if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
 }
 
+// Global process error guards to prevent unhandled rejections/exceptions from killing the bot.
+process.on('unhandledRejection', (reason, promise) => {
+    const msg = reason && reason.stack ? reason.stack : String(reason);
+    console.error(`[UNHANDLED REJECTION] ${msg}`);
+    try {
+        const { logError } = require('./src/actionLog');
+        logError('SYSTEM', `Unhandled Rejection: ${msg}`);
+    } catch (_) {}
+});
+
+process.on('uncaughtException', (err) => {
+    const msg = err && err.stack ? err.stack : String(err);
+    console.error(`[UNCAUGHT EXCEPTION] ${msg}`);
+    try {
+        const { logError } = require('./src/actionLog');
+        logError('SYSTEM', `Uncaught Exception: ${msg}`);
+    } catch (_) {}
+});
+
 // Entry point for the PSOBB Discord bot.
 // All logic lives in ./src/* modules; this file just wires events and logs in.
 const { Events, ChannelType } = require('discord.js');

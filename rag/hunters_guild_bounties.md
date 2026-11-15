@@ -16,7 +16,13 @@ As Pioneer 2's Mission Control, you monitor and support the Hunters in completin
 - Highly challenging group missions that require cooperation, specific party compositions, or difficulty requirements.
 - **Common Directives:**
   - **Diverse Party (HU, RA, FO) Requirement:** Defeating specific bosses (e.g., Olga Flow, De Rol Le, Vol Opt) with a party containing at least one Hunter (HU), one Ranger (RA), and one Force (FO).
-  - **Hardcore Carry Requirement:** Escorting lower-level players (typically 10+ levels lower than the carry leader) through major boss fights (e.g., Barba Ray, Gol Dragon).
+  - **Hardcore Carry Requirement:** Escorting lower-level players (typically 10+ levels lower than the carry leader) through major boss fights (e.g., Barba Ray, Gol Dragon, Vol Opt).
+
+### Bounty & Milestone Reward Pools
+- Bounties and Level Milestones on PSOBB.IO roll from curated reward tables that include weapons, armor, high-end units (Heavenly/Battle, V502), and rare **Mag Cells & Evolution Kits**:
+  - **High Tier (Lv 120+ / Ultimate Boss Bounties):** Can roll **Liberta Kit**, **Heaven Striker Coat**, **Tablet**, **Photon Spheres**, **Red Ring**, and **Parasitic Gene "Flow"**.
+  - **Mid Tier (Lv 90+):** Can roll **Pioneer Parts**, **D-Photon Core**, **Yahoo!s Engine**, and **Photon Crystals**.
+  - **Lower Tier (Lv 60+):** Can roll **Amities Memo** (Chu Chu) and **Heart of Morolian**.
 
 ---
 
