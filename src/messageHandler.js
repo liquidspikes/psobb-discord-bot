@@ -114,6 +114,7 @@ function registerMessageHandlers() {
 
     client.on(Events.MessageCreate, async (message) => {
         if (!message || message.system || handledMessages.has(message.id)) return;
+        if (message.channel && (message.channel.id === '1571397592196190290' || (process.env.ADMIN_AGENT_CHANNEL_ID && message.channel.id === process.env.ADMIN_AGENT_CHANNEL_ID))) return;
         handledMessages.add(message.id);
         if (handledMessages.size > 1000) handledMessages.clear();
 
