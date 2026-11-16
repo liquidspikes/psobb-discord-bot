@@ -15,6 +15,14 @@ const commands = require('./commands');
 
 const handledMessages = new Set();
 
+const QUEST_AUTHOR_IDS = new Set(
+    (process.env.QUEST_ADMIN_USER_IDS || '153904984621056001,810787678474862604,293499177718251522,115442945917714439,350990733806927872')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+);
+const QUEST_DM_RE = /\.qst\b|\b(quest|deploy|remove|delete|replace|update|revise|revision|swap|slot|qid|opm|extermination|solo-extra)\b/i;
+
 async function safeReply(message, options) {
     try {
         return await message.reply(options);
@@ -163,6 +171,21 @@ function registerMessageHandlers() {
             // command to ignore); false only for passthrough commands (!stats,
             // !quests, !progress, !progression) that continue into the AI flow.
             if (await commands.dispatch(message)) return;
+        }
+
+        const hasQstAttachment = Boolean(
+            message.attachments &&
+            message.attachments.some((a) => String(a.name || '').toLowerCase().endsWith('.qst'))
+        );
+        if (
+            isDM &&
+            !isCommand &&
+            message.author &&
+            QUEST_AUTHOR_IDS.has(message.author.id) &&
+            (QUEST_DM_RE.test(message.content || '') || hasQstAttachment)
+        ) {
+            console.log(`[DM] Skipping Hex AI reply on quest-management DM from ${message.author.tag} (handled by Admin Agent)`);
+            return;
         }
 
         console.log("[MSG] From: " + message.author.tag + " | Content: " + message.content);
