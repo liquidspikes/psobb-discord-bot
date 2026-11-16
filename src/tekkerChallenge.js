@@ -920,6 +920,7 @@ async function processSlashGuess(interaction) {
 }
 
 let despawnInterval = null;
+let lastDespawnedKey = null;
 
 function startDespawnWatcher() {
     if (despawnInterval) clearInterval(despawnInterval);
@@ -927,11 +928,25 @@ function startDespawnWatcher() {
         try {
             const drop = await db.getActiveDrop();
             if (!drop) return;
-            
+
+            if (!drop.drop_id) {
+                const nullKey = `null:${drop.despawn_time || ''}`;
+                if (lastDespawnedKey !== nullKey) {
+                    lastDespawnedKey = nullKey;
+                    logWarn('TEKKER', 'Ignoring/deactivating malformed active drop with missing drop_id.');
+                }
+                await db.deactivateDrop('');
+                return;
+            }
+
             const now = Date.now();
             const despawnTime = new Date(drop.despawn_time).getTime();
-            
+
             if (now >= despawnTime) {
+                const despawnKey = `${drop.drop_id}:${drop.despawn_time || ''}`;
+                if (lastDespawnedKey === despawnKey) return;
+                lastDespawnedKey = despawnKey;
+
                 // Expired!
                 await db.deactivateDrop(drop.drop_id);
                 await db.clearActiveUsers();
