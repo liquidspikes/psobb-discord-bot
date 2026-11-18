@@ -170,7 +170,7 @@ client.once(Events.ClientReady, async (c) => {
 
                     for (const channel of channels.values()) {
                         // ChannelType.GuildVoice = 2
-                        if (channel.type === ChannelType.GuildVoice) {
+                        if (channel && channel.type === ChannelType.GuildVoice) {
                             const members = channel.members;
                             // Ignore bots, self-muted, self-deafened, or solo users
                             const activeMembers = members.filter(m => 
