@@ -1,8 +1,7 @@
-const fs = require('fs');
 const path = require('path');
 const { MessageFlags } = require('discord.js');
 const { MEMORY_DIR } = require('./config');
-const { logInfo, logError } = require('./actionLog');
+const { readJsonFile, writeJsonFile } = require('./jsonStore');
 
 const PREFS_PATH = path.join(MEMORY_DIR, 'user_notifications.json');
 
@@ -10,26 +9,12 @@ const PREFS_PATH = path.join(MEMORY_DIR, 'user_notifications.json');
 let prefs = {};
 
 function load() {
-    try {
-        if (fs.existsSync(PREFS_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') {
-                prefs = obj;
-                return;
-            }
-        }
-    } catch (e) {
-        logError('NOTIFY', `Load error: ${e.message}`);
-    }
-    prefs = {};
+    const obj = readJsonFile(PREFS_PATH, {}, 'NOTIFY');
+    prefs = (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
 }
 
 function save() {
-    try {
-        fs.writeFileSync(PREFS_PATH, JSON.stringify(prefs, null, 2));
-    } catch (e) {
-        logError('NOTIFY', `Save error: ${e.message}`);
-    }
+    writeJsonFile(PREFS_PATH, prefs, 'NOTIFY');
 }
 
 // Load on start

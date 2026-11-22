@@ -18,13 +18,14 @@
 // leave the party or the room is torn down. Discord can only relocate members who
 // are already connected to voice, so players not in the lobby just get the ping.
 // =====================================================================
-const fs = require('fs');
 const path = require('path');
 const { ChannelType, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { client } = require('./discordClient');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
+const { readJsonFile, writeJsonFile } = require('./jsonStore');
+const { resolveGuildRole } = require('./pso');
 
 const CFG = config.party_rooms || {};
 // Category to create the temp voice channels under. Configurable; falls back to
@@ -51,25 +52,11 @@ const STATE_PATH = path.join(MEMORY_DIR, 'party_rooms.json');
 // game_id -> { channelId, members: [discordId already granted/pinged], emptySince: ms|null }
 let rooms = {};
 function loadState() {
-    try {
-        if (fs.existsSync(STATE_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') return obj;
-        }
-    } catch (e) { logError('PARTY', `State load error: ${e.message}`); }
-    return {};
+    const obj = readJsonFile(STATE_PATH, null, 'PARTY');
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
 }
 function saveState() {
-    try {
-        fs.writeFileSync(STATE_PATH, JSON.stringify(rooms, null, 2));
-    } catch (e) { logError('PARTY', `State save error: ${e.message}`); }
-}
-
-function resolveRole(guild, idOrName) {
-    if (!idOrName) return null;
-    return guild.roles.cache.get(idOrName)
-        || guild.roles.cache.find((r) => r.name.toLowerCase() === String(idOrName).toLowerCase())
-        || null;
+    writeJsonFile(STATE_PATH, rooms, 'PARTY');
 }
 
 // Best-effort voice move. Relocates `discordId` to `toChannelId` only if they are
@@ -107,7 +94,7 @@ function buildOverwrites(guild, memberIds) {
         // The bot itself, so it can post and manage the channel.
         { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] },
     ];
-    const supportRole = resolveRole(guild, COMMUNITY_ROLE);
+    const supportRole = resolveGuildRole(guild, COMMUNITY_ROLE);
     if (supportRole) {
         overwrites.push({ id: supportRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.SendMessages] });
     }
@@ -336,7 +323,7 @@ async function startPartyRooms(guild) {
             logWarn('PARTY', `auto_move lobby_id ${LOBBY_ID} is not a voice channel; auto-move will be a no-op until it's fixed.`);
         }
     }
-    const supportRole = resolveRole(guild, COMMUNITY_ROLE);
+    const supportRole = resolveGuildRole(guild, COMMUNITY_ROLE);
     if (COMMUNITY_ROLE && !supportRole) {
         logWarn('PARTY', `Community-support role "${COMMUNITY_ROLE}" not found; party rooms will be players + admins only.`);
     }

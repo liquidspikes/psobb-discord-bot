@@ -16,13 +16,13 @@
 // replicate — so `getClaimLog` stays empty here. This mode covers everything
 // the bot drives: drops, guessing, shifts, and tokens (mint/gift/trade/grant).
 // =====================================================================
-const fs = require('fs');
 const path = require('path');
 const { MEMORY_DIR } = require('./config');
-const { logInfo, logError } = require('./actionLog');
+const { logInfo } = require('./actionLog');
+const { readJsonFile, writeJsonFile } = require('./jsonStore');
+const { WEAPON_ATTR_CATEGORIES: CATEGORIES } = require('./pso');
 
 const STORE_PATH = path.join(MEMORY_DIR, 'tekker_local.json');
-const CATEGORIES = ['Native', 'A.Beast', 'Machine', 'Dark', 'Hit'];
 const VARIANCES = [-10, -5, 0, 5, 10];
 
 // Mirrors the website schema's working set. drops/tokens/etc. are arrays so the
@@ -39,24 +39,14 @@ let data = {
 };
 
 function load() {
-    try {
-        if (fs.existsSync(STORE_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') {
-                data = Object.assign(data, obj);
-            }
-        }
-    } catch (e) {
-        logError('TEKKER', `Local store load error (${STORE_PATH}): ${e.message}`);
+    const obj = readJsonFile(STORE_PATH, null, 'TEKKER');
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        data = Object.assign(data, obj);
     }
 }
 
 function save() {
-    try {
-        fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
-    } catch (e) {
-        logError('TEKKER', `Local store save error: ${e.message}`);
-    }
+    writeJsonFile(STORE_PATH, data, 'TEKKER');
 }
 
 load();

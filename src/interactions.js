@@ -6,11 +6,11 @@
 // the 💠 linked badge, until their first message/reaction flips them to true.
 // Stored as JSON in the bot's memory dir (like the roster / locks).
 // =====================================================================
-const fs = require('fs');
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
 const { MEMORY_DIR } = require('./config');
 const { logInfo, logError } = require('./actionLog');
+const { readJsonFile, writeJsonFile } = require('./jsonStore');
 
 const INTERACTIONS_PATH = path.join(MEMORY_DIR, 'interactions.json');
 
@@ -25,30 +25,24 @@ const ONE_HOUR_MS = 60 * 60 * 1000;
 let meta = { lastFullScanAt: 0 };
 
 function load() {
-    try {
-        if (fs.existsSync(INTERACTIONS_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(INTERACTIONS_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') {
-                // New wrapped format: { users: { id: ts }, meta: {...} }. The legacy
-                // format was a flat { id: ts } map — detect it by the absence of a
-                // `users` key (snowflake IDs are numeric, never literally "users").
-                const usersObj = (obj.users && typeof obj.users === 'object') ? obj.users : obj;
-                if (obj.meta && typeof obj.meta === 'object') meta = { lastFullScanAt: 0, ...obj.meta };
-                return new Map(Object.entries(usersObj).map(([k, v]) => {
-                    if (typeof v === 'number') return [k, v];
-                    // Backwards compatibility for existing boolean flags
-                    return [k, v === true ? Date.now() : 0];
-                }));
-            }
-        }
-    } catch (e) { logError('INTERACT', `Load error: ${e.message}`); }
+    const obj = readJsonFile(INTERACTIONS_PATH, null, 'INTERACT');
+    if (obj && typeof obj === 'object') {
+        // New wrapped format: { users: { id: ts }, meta: {...} }. The legacy
+        // format was a flat { id: ts } map — detect it by the absence of a
+        // `users` key (snowflake IDs are numeric, never literally "users").
+        const usersObj = (obj.users && typeof obj.users === 'object') ? obj.users : obj;
+        if (obj.meta && typeof obj.meta === 'object') meta = { lastFullScanAt: 0, ...obj.meta };
+        return new Map(Object.entries(usersObj).map(([k, v]) => {
+            if (typeof v === 'number') return [k, v];
+            // Backwards compatibility for existing boolean flags
+            return [k, v === true ? Date.now() : 0];
+        }));
+    }
     return new Map();
 }
 let log = load();
 function save() {
-    try {
-        fs.writeFileSync(INTERACTIONS_PATH, JSON.stringify({ users: Object.fromEntries(log), meta }, null, 2));
-    } catch (e) { logError('INTERACT', `Save error: ${e.message}`); }
+    writeJsonFile(INTERACTIONS_PATH, { users: Object.fromEntries(log), meta }, 'INTERACT');
 }
 
 function hasInteracted(id) {

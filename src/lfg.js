@@ -7,12 +7,13 @@
 // from the server's latest_id on first run so an existing backlog isn't dumped
 // into the channel.
 // =====================================================================
-const fs = require('fs');
 const path = require('path');
 const { config, MEMORY_DIR } = require('./config');
 const { client } = require('./discordClient');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
+const { readJsonFile, writeJsonFile } = require('./jsonStore');
+const { resolveGuildRole } = require('./pso');
 const { MessageFlags } = require('discord.js');
 
 // Channel to announce in. Configurable via lfg_sync.channel_id (or top-level
@@ -39,25 +40,14 @@ function archetypeToRole(token) {
 // Persisted cursor: the highest LFG post id we've already announced.
 const CURSOR_PATH = path.join(MEMORY_DIR, 'last_lfg_id.json');
 function loadCursor() {
-    try {
-        if (fs.existsSync(CURSOR_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(CURSOR_PATH, 'utf8'));
-            if (obj && Number.isFinite(obj.lastId)) return obj.lastId;
-        }
-    } catch (e) { logError('LFG', `Cursor load error: ${e.message}`); }
-    return null; // null = not seeded yet (first ever run)
+    const obj = readJsonFile(CURSOR_PATH, null, 'LFG');
+    return (obj && Number.isFinite(obj.lastId)) ? obj.lastId : null; // null = not seeded yet (first ever run)
 }
 function saveCursor(id) {
-    try {
-        fs.writeFileSync(CURSOR_PATH, JSON.stringify({ lastId: id }, null, 2));
-    } catch (e) { logError('LFG', `Cursor save error: ${e.message}`); }
+    writeJsonFile(CURSOR_PATH, { lastId: id }, 'LFG');
 }
 
 let lastId = loadCursor();
-
-function findRole(guild, name) {
-    return guild.roles.cache.find((r) => r.name.toLowerCase() === name.toLowerCase()) || null;
-}
 
 // Build the announcement message + the list of role ids we're allowed to ping.
 function buildAnnouncement(guild, post) {
@@ -71,7 +61,7 @@ function buildAnnouncement(guild, post) {
         const roleName = archetypeToRole(tok);
         if (!roleName || seen.has(roleName)) continue;
         seen.add(roleName);
-        const role = guild && findRole(guild, roleName);
+        const role = guild && resolveGuildRole(guild, roleName);
         if (role) { mentions.push(`<@&${role.id}>`); roleIds.push(role.id); }
         else mentions.push(`**${roleName}**`); // role not on server — name only, no ping
     }

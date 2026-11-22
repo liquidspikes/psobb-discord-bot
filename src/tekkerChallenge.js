@@ -1,18 +1,16 @@
 // Core Game Logic Layer for Discord Tekker Challenge
 const axios = require('axios');
-const path = require('path');
-const fs = require('fs');
-const { config, MEMORY_DIR } = require('./config');
+const { config, ONLINE_ROLE_ID } = require('./config');
 const db = require('./tekkerDb');
 const { logInfo, logWarn, logError } = require('./actionLog');
 const { client } = require('./discordClient');
+const { isUserLinked } = require('./roleSync');
+const {
+    WEAPON_ATTR_CATEGORIES: CATEGORIES,
+    WEAPON_ATTR_EMOJIS: EMOJIS,
+    TEKKER_MASKED_WEAPON: MASKED_WEAPON,
+} = require('./pso');
 const { MessageFlags } = require('discord.js');
-
-// The tekker game deals ONLY in attribute/hit percentages — it does not pick or
-// store a weapon. A win mints a token that guarantees these stats; the actual
-// weapon is decided later by the (future) website claim page. This label is the
-// flavour name shown in Discord for the as-yet-undetermined reward.
-const MASKED_WEAPON = '❓ SPECIAL WEAPON';
 
 // Shown prominently whenever the game runs against the local test store
 // (tekkerDb.LOCAL_MODE) so players understand tokens won here are NOT real
@@ -24,15 +22,6 @@ const TEST_MODE_WIN_NOTICE =
 const TEST_MODE_DROP_FIELD = {
     name: '🧪 TEST MODE — practice only',
     value: 'This puzzle is running on the bot\'s local test store. Any token won here is a **local test token** and will **NOT** become a real reward until the website is brought up to date.',
-};
-
-const CATEGORIES = ["Native", "A.Beast", "Machine", "Dark", "Hit"];
-const EMOJIS = {
-    "Native": "🗡️",
-    "A.Beast": "🐾",
-    "Machine": "🤖",
-    "Dark": "👻",
-    "Hit": "🎯"
 };
 
 // Cooldown tracker maps to enforce chat message (10s) and reaction (5s) anti-spam rules
@@ -74,34 +63,12 @@ const TEKKER_CHANNEL_ID = String(
     (config.tekker || {}).channel_id || config.tekker_channel_id || '1514826464631984168'
 );
 
-// The "Pioneer.IO [ONLINE]" role — pinged when a new drop is announced so players
-// currently in-game are alerted. Same id/config key as roleSync's online role.
-const ONLINE_ROLE_ID = String(
-    (config.role_sync || {}).online_role_id || '1513735102759440424'
-);
-
 // At the START of each game the tekker channel is wiped clean except for this
 // ONE message (e.g. a pinned rules/info post). Configurable via
 // tekker.keep_message_id; falls back to the known pinned message.
 const KEEP_MESSAGE_ID = String(
     (config.tekker || {}).keep_message_id || '1514911615839899770'
 );
-
-// Check if a Discord User ID is linked to the website database
-function isUserLinked(userId) {
-    const rosterPath = path.join(MEMORY_DIR, 'linked_roster.json');
-    try {
-        if (fs.existsSync(rosterPath)) {
-            const arr = JSON.parse(fs.readFileSync(rosterPath, 'utf8'));
-            if (Array.isArray(arr)) {
-                return arr.map(String).includes(String(userId));
-            }
-        }
-    } catch (e) {
-        logError('TEKKER', `Failed to read linked roster from disk: ${e.message}`);
-    }
-    return false;
-}
 
 // Generate an unambiguous alphanumeric token code (excluding easily confused characters like O, 0, I, 1)
 function generateTokenId() {

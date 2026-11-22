@@ -31,6 +31,7 @@
 // =====================================================================
 const { logInfo, logWarn, handleLogCommand } = require('./actionLog');
 const { gateCommand, handleHealthCommand } = require('./healthcheck');
+const { WEAPON_ATTR_EMOJIS, TEKKER_MASKED_WEAPON } = require('./pso');
 const {
     handleSyncCommand,
     handleSyncAllCommand,
@@ -371,11 +372,10 @@ register({
             const threshold = await db.getTriggerThreshold();
 
             if (drop) {
-                const EMOJIS = { "Native": "🗡️", "A.Beast": "🐾", "Machine": "🤖", "Dark": "👻", "Hit": "🎯" };
                 return await message.reply(
                     `🎮 **Tekker Challenge Status**\n` +
-                    `• Active Drop: **[❓ SPECIAL WEAPON]**\n` +
-                    `• Scanner Hint: **${EMOJIS[drop.hint_attribute]} ${drop.hint_attribute}** is **0%**.\n\n` +
+                    `• Active Drop: **[${TEKKER_MASKED_WEAPON}]**\n` +
+                    `• Scanner Hint: **${WEAPON_ATTR_EMOJIS[drop.hint_attribute]} ${drop.hint_attribute}** is **0%**.\n\n` +
                     `*Use \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` to claim it!*`
                 );
             } else {
