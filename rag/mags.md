@@ -41,11 +41,11 @@ Evolution depends on the **Class**, **Gender**, and **Section ID** of the charac
   - Triggers: Invincibility at 100% PB and 10% HP. Highly prized.
 
 ## Cell Mags & Mag Evolution Kits
-- Special "Cell Mags" (like **Liberta**, **Chu Chu**, **RoboChao**, **Nidra**, **Mark3**, **Sega Saturn**, **Puyo**) require specific Mag Cell / Kit items (e.g. **Liberta Kit**, **Amities Memo**, **Pioneer Parts**, **D-Photon Core**).
+- Special "Cell Mags" (like **Liberta**, **Chu Chu**, **RoboChao**, **Nidra**, **Mark3**, **Sega Saturn**, **Puyo**) require specific Mag Cell / Kit items (e.g. **Liberta Kit**, **Amitie's Memo**, **Pioneer Parts**, **D-Photon Core**).
 - **Where to get Mag Cells on PSOBB.IO:** 
-  - Mag Cells do **NOT** drop from monsters/boxes.
-  - They are obtained through high-tier **Hunter's Guild Bounties** (`https://psobb.io/missions`) and **Level Milestone Rewards** (`https://psobb.io/`) from the Random category pool (e.g. **Liberta Kit** is a Tier 9/10 reward for Level 120+ Hunters).
-  - See `mag_cells_and_evolution_kits.md` for the complete list and stat requirements.
+  - Classic Mag Cells do **NOT** drop from normal monsters/boxes (aside from Blue Burst Ultimate boss evolution items like *D-Photon Core* and *Heaven Striker Coat*).
+  - They are obtained through **Level Milestone Rewards** (`https://psobb.io/unlocks`) from the **Random** category pool (e.g. **Liberta Kit** in Tier 9/10 for Level 120+ Hunters), **Hunter's Guild Bounties** (`https://psobb.io/missions`, via **Item Tickets** for *Item Present* and Mythic Rare exchange rolls), and seasonal events.
+  - See `mag_cells_and_evolution_kits.md` for the complete list and requirements.
 
 ## Photon Blasts (PB)
 - **Mylla & Youlla (M&Y):** The most important PB. Provides Shifta & Deband buffs.
