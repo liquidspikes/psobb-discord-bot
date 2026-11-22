@@ -41,5 +41,13 @@ if (process.env.NODE_ENV === 'test') {
     }
 }
 
-module.exports = { config, MEMORY_DIR, RAG_PATH, MAIN_KNOWLEDGE_PATH };
+const ONLINE_ROLE_ID = String(
+    process.env.ONLINE_ROLE_ID !== undefined
+        ? process.env.ONLINE_ROLE_ID
+        : ((config.role_sync || {}).online_role_id !== undefined
+            ? (config.role_sync || {}).online_role_id
+            : '1513735102759440424')
+).trim();
+
+module.exports = { config, MEMORY_DIR, RAG_PATH, MAIN_KNOWLEDGE_PATH, ONLINE_ROLE_ID };
 

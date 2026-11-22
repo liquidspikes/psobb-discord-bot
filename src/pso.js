@@ -18,6 +18,17 @@ const CLASS_ID_MAP = {
 
 const SECTION_ID_NAMES = ['Viridia', 'Greenill', 'Skyly', 'Bluefull', 'Purplenum', 'Pinkal', 'Redria', 'Oran', 'Yellowboze', 'Whitill'];
 
+// Shared Tekker Challenge / weapon attribute constants.
+const WEAPON_ATTR_CATEGORIES = ['Native', 'A.Beast', 'Machine', 'Dark', 'Hit'];
+const WEAPON_ATTR_EMOJIS = {
+    Native: '🗡️',
+    'A.Beast': '🐾',
+    Machine: '🤖',
+    Dark: '👻',
+    Hit: '🎯'
+};
+const TEKKER_MASKED_WEAPON = '❓ SPECIAL WEAPON';
+
 // Build the full set of role names the bot is allowed to manage (lowercased).
 // NOTE: these must match the role names that exist on the server exactly
 // (matching is case-insensitive). The PSOBB.IO server uses "Rookie" + "LVL10".."LVL200".
@@ -29,19 +40,18 @@ const MANAGED_ROLE_NAMES = new Set(
 );
 
 function normalizeSectionId(sectionId) {
-    if (sectionId && typeof sectionId === 'string') {
-        let norm = sectionId.charAt(0).toUpperCase() + sectionId.slice(1).toLowerCase();
+    if (sectionId === null || sectionId === undefined) return null;
+    if (typeof sectionId === 'number' || /^\d+$/.test(String(sectionId).trim())) {
+        return SECTION_ID_NAMES[Number(String(sectionId).trim())] || null;
+    }
+    if (typeof sectionId === 'string') {
+        const cleaned = sectionId.trim();
+        if (!cleaned) return null;
+        let norm = cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase();
         // newserv spells this Section ID with a double-n; the rest of the site
         // (and the Discord role) uses the single-n form. Accept both.
         if (norm === 'Greennill') norm = 'Greenill';
         return SECTION_ID_NAMES.includes(norm) ? norm : null;
-    }
-    if (sectionId !== null && sectionId !== undefined) {
-        const map = {
-            0: 'Viridia', 1: 'Greenill', 2: 'Skyly', 3: 'Bluefull', 4: 'Purplenum',
-            5: 'Pinkal', 6: 'Redria', 7: 'Oran', 8: 'Yellowboze', 9: 'Whitill'
-        };
-        return map[sectionId] || null;
     }
     return null;
 }
@@ -64,13 +74,29 @@ function levelRoleName(level) {
     return 'LVL' + Math.min(200, Math.floor(lvl / 10) * 10);
 }
 
+/**
+ * Resolves a Discord Role from a guild cache by snowflake ID or case-insensitive name.
+ */
+function resolveGuildRole(guild, idOrName) {
+    if (!guild || !guild.roles || !guild.roles.cache || !idOrName) return null;
+    const key = String(idOrName).trim();
+    if (!key) return null;
+    return guild.roles.cache.get(key)
+        || guild.roles.cache.find((r) => r.name.toLowerCase() === key.toLowerCase())
+        || null;
+}
+
 module.exports = {
     SUBCLASS_TO_MAIN,
     CLASS_ID_MAP,
     SECTION_ID_NAMES,
     LEVEL_ROLE_NAMES,
     MANAGED_ROLE_NAMES,
+    WEAPON_ATTR_CATEGORIES,
+    WEAPON_ATTR_EMOJIS,
+    TEKKER_MASKED_WEAPON,
     normalizeSectionId,
     normalizeClass,
     levelRoleName,
+    resolveGuildRole,
 };

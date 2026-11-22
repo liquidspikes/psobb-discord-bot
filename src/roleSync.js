@@ -5,12 +5,12 @@
 // nickname. Assign-existing-only: an admin must pre-create the roles;
 // the bot never creates or recolors roles, it only adds/removes them.
 // =====================================================================
-const fs = require('fs');
 const path = require('path');
 const { ChannelType } = require('discord.js');
-const { config, MEMORY_DIR } = require('./config');
+const { config, MEMORY_DIR, ONLINE_ROLE_ID } = require('./config');
 const { apiCall } = require('./api');
 const { logInfo, logWarn, logError } = require('./actionLog');
+const { readJsonFile, writeJsonFile } = require('./jsonStore');
 const { lurkerTier } = require('./interactions');
 const { canSupport, memberTier, resolveMember } = require('./permissions');
 const {
@@ -142,16 +142,7 @@ function isStrippableRole(role) {
 const SECTION_ID_ROLE_SET = new Set([...SECTION_ID_NAMES].map((n) => String(n).toLowerCase()));
 
 // Live-presence role ("Pioneer.IO [ONLINE]"): held by a linked member ONLY while
-// they are online in-game, and removed the moment they go offline. Managed entirely
-// inside syncMember from playerInfo.is_online, so it stays atomic with the rest of
-// the role set and is never clobbered by the strip/replace logic. Configurable via
-// role_sync.online_role_id; set to "" to disable. NOTE: like every assigned role,
-// the bot's own role must sit ABOVE this one in the hierarchy or Discord rejects it.
-const ONLINE_ROLE_ID = String(
-    (config.role_sync || {}).online_role_id !== undefined
-        ? (config.role_sync || {}).online_role_id
-        : '1513735102759440424'
-).trim();
+// they are online in-game, and removed the moment they go offline. Configured in config.js.
 let warnedOnlineRoleMissing = false;
 
 // Text/emoji prefix prepended to every linked member's nickname on a successful
@@ -459,23 +450,23 @@ async function runLurkerPass(guild, onProgress) {
 // when the server feed does not expose Discord IDs).
 const ROSTER_PATH = path.join(MEMORY_DIR, 'linked_roster.json');
 function loadRoster() {
-    try {
-        if (fs.existsSync(ROSTER_PATH)) {
-            const arr = JSON.parse(fs.readFileSync(ROSTER_PATH, 'utf8'));
-            if (Array.isArray(arr)) return new Set(arr.map(String));
-        }
-    } catch (e) { logError('ROLE-SYNC', `Roster load error: ${e.message}`); }
-    return new Set();
+    const arr = readJsonFile(ROSTER_PATH, [], 'ROLE-SYNC');
+    return Array.isArray(arr) ? new Set(arr.map(String)) : new Set();
 }
 let linkedRoster = loadRoster();
+function isUserLinked(id) {
+    const key = String(id);
+    if (linkedRoster.has(key)) return true;
+    linkedRoster = loadRoster();
+    return linkedRoster.has(key);
+}
 function addToRoster(id) {
     id = String(id);
     if (linkedRoster.has(id)) return;
     linkedRoster.add(id);
-    try {
-        fs.writeFileSync(ROSTER_PATH, JSON.stringify([...linkedRoster], null, 2));
+    if (writeJsonFile(ROSTER_PATH, [...linkedRoster], 'ROLE-SYNC')) {
         logInfo('ROLE-SYNC', `Added ${id} to linked roster (now ${linkedRoster.size}).`);
-    } catch (e) { logError('ROLE-SYNC', `Roster save error: ${e.message}`); }
+    }
 }
 
 // Option A cache: the last active character name the bot observed for each Discord ID
@@ -483,13 +474,8 @@ function addToRoster(id) {
 // last-used character instead of falling back to their highest-level one.
 const LAST_CHAR_PATH = path.join(MEMORY_DIR, 'last_character.json');
 function loadLastChars() {
-    try {
-        if (fs.existsSync(LAST_CHAR_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(LAST_CHAR_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') return new Map(Object.entries(obj));
-        }
-    } catch (e) { logError('ROLE-SYNC', `Last-character load error: ${e.message}`); }
-    return new Map();
+    const obj = readJsonFile(LAST_CHAR_PATH, null, 'ROLE-SYNC');
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? new Map(Object.entries(obj)) : new Map();
 }
 let lastChars = loadLastChars();
 function getLastChar(id) {
@@ -499,9 +485,7 @@ function setLastChar(id, name) {
     id = String(id);
     if (!name || lastChars.get(id) === name) return; // no change → no disk write
     lastChars.set(id, name);
-    try {
-        fs.writeFileSync(LAST_CHAR_PATH, JSON.stringify(Object.fromEntries(lastChars), null, 2));
-    } catch (e) { logError('ROLE-SYNC', `Last-character save error: ${e.message}`); }
+    writeJsonFile(LAST_CHAR_PATH, Object.fromEntries(lastChars), 'ROLE-SYNC');
 }
 
 // Persisted per-user sync locks: { [discordId]: { secid?: true, nickname?: true } }.
@@ -509,13 +493,8 @@ function setLastChar(id, name) {
 // by the sync, via "!lock secid" / "!lock nickname".
 const LOCKS_PATH = path.join(MEMORY_DIR, 'role_sync_locks.json');
 function loadLocks() {
-    try {
-        if (fs.existsSync(LOCKS_PATH)) {
-            const obj = JSON.parse(fs.readFileSync(LOCKS_PATH, 'utf8'));
-            if (obj && typeof obj === 'object') return new Map(Object.entries(obj));
-        }
-    } catch (e) { logError('ROLE-SYNC', `Locks load error: ${e.message}`); }
-    return new Map();
+    const obj = readJsonFile(LOCKS_PATH, null, 'ROLE-SYNC');
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? new Map(Object.entries(obj)) : new Map();
 }
 let memberLocks = loadLocks();
 function getLocks(id) {
@@ -527,9 +506,7 @@ function setLock(id, kind, enabled) {
     if (enabled) cur[kind] = true; else delete cur[kind];
     if (Object.keys(cur).length === 0) memberLocks.delete(id);
     else memberLocks.set(id, cur);
-    try {
-        fs.writeFileSync(LOCKS_PATH, JSON.stringify(Object.fromEntries(memberLocks), null, 2));
-    } catch (e) { logError('ROLE-SYNC', `Locks save error: ${e.message}`); }
+    writeJsonFile(LOCKS_PATH, Object.fromEntries(memberLocks), 'ROLE-SYNC');
 }
 
 function getDiscordIdFromEntry(entry) {
@@ -1360,6 +1337,7 @@ function selfCheck() {
 module.exports = {
     startRoleSync,
     selfCheck,
+    isUserLinked,
     handleSyncCommand,
     handleSyncAllCommand,
     handleLockCommand,
