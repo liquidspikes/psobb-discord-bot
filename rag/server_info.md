@@ -45,4 +45,4 @@ Determined by character name at creation. Affects item drop tables.
 Our server utilizes a high-frequency background daemon (running at 5-second intervals) that actively tracks player transitions and performance:
 - **Boss Kill Tracking:** Automatically logs boss room entries, exits, and character EXP/item changes to verify boss kills and achievements.
 - **Speedrun & Floor Clearing:** Records exact floor-to-floor transition times to track speeds and speedruns.
-- Logs and progress are consumed by the server's mission system (`cron_missions.php`).
+- Logs and progress feed directly into the Hunter's Guild Bounty Board (https://psobb.io/missions).
