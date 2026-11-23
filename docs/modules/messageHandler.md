@@ -14,12 +14,16 @@
    - `markInteracted` for guild messages; `trackActivity(...,'message')` only for non-command guild messages **and** when `isFeatureUp('tekker')`;
    - gate: only proceeds if DM, mentioned, a command (`!`/`/`), or in `channel_id`;
    - **command routing:** for any `!`/`/` message, calls `commands.dispatch(message)` ([commands](commands.md)). `dispatch()` applies the website-dependency health gate (`gateCommand`) and runs the first matching command; if it returns `true` the message is consumed and handling stops. It returns `false` only for passthrough commands (`!stats`/`!quests`/`!progress`/`!progression`), which continue into the AI flow below;
-   - otherwise: build per-user history (isolated in public channels, last 12 turns), inject context (time, user id, social memory, online session), `model.startChat()`, run the **tool loop** (≤5 iterations), then chunk the reply under 2000 chars.
+   - otherwise: build per-user history (isolated in public channels, last 12 turns), inject context (time, user id, social memory, online session), iterate active non-cooled models in `candidateModelNames` via direct `generateContent({ contents })`, run the **tool loop** (<=5 iterations, sending `functionResponse` as role `'user'` for Gemini 3.x+/Gemma or `'function'` for 2.x, preserving `thoughtSignature`, filtering `thought: true` reasoning parts, and caching HTTP `429` cooldowns per model), then chunk the reply under 2000 chars.
 
 ## Exports
 | Symbol | Description |
 | --- | --- |
 | `registerMessageHandlers()` | Wires the listeners (called once by [`bot.js`](bot.md)). |
+| `compute429CooldownMs(errMsg)` | Computes RPM vs daily (`PerDay`) `429` cooldown backoff in milliseconds. |
+| `sanitizeModelParts(parts)` | Drops empty `thought` placeholder parts while preserving `functionCall` and `thoughtSignature` parts. |
+| `extractResponseText(response)` | Concatenates visible text parts while excluding `thought: true` reasoning parts. |
+| `functionResponseRoleForModel(modelName)` | Returns `'function'` for `gemini-2.*` and `'user'` for Gemini 3.x+ / Gemma models. |
 
 ## Command routing
 The full command registry and routing order live in [`commands`](commands.md). This module only invokes `commands.dispatch(message)`; the slash `/guess` is handled separately in the `InteractionCreate` listener above (→ [`tekkerChallenge`](tekkerChallenge.md)).

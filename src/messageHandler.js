@@ -14,6 +14,54 @@ const { isFeatureUp, featureForTool, toolDownResult } = require('./healthcheck')
 const commands = require('./commands');
 
 const handledMessages = new Set();
+const modelCooldownUntil = new Map();
+
+/**
+ * Computes HTTP 429 cooldown duration in milliseconds from Gemini API error text.
+ */
+function compute429CooldownMs(errMessage = '') {
+    const msg = String(errMessage || '');
+    const delayMatch = msg.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i);
+    const retryMs = delayMatch ? Math.ceil(parseFloat(delayMatch[1]) * 1000) + 5000 : 0;
+    if (/per[_\s-]*day|PerDay/i.test(msg)) {
+        return Math.max(3600 * 1000, Math.min(retryMs || 3600 * 1000, 18 * 3600 * 1000));
+    }
+    return Math.max(15 * 1000, Math.min(retryMs || 65 * 1000, 180 * 1000));
+}
+
+/**
+ * Strips empty thought placeholder parts while keeping functionCall/thoughtSignature intact.
+ */
+function sanitizeModelParts(parts) {
+    if (!Array.isArray(parts)) return [];
+    const filtered = parts.filter(
+        (p) => p && !(p.thought && (!p.text || p.text === '') && !p.functionCall && !p.thoughtSignature)
+    );
+    return filtered.length > 0 ? filtered : parts;
+}
+
+/**
+ * Extracts visible text parts, skipping model reasoning ("thought: true") parts.
+ */
+function extractResponseText(response) {
+    const parts = response?.candidates?.[0]?.content?.parts;
+    if (Array.isArray(parts)) {
+        const nonThought = parts
+            .filter((p) => p && !p.thought && typeof p.text === 'string')
+            .map((p) => p.text)
+            .join('');
+        if (nonThought.trim()) return nonThought;
+    }
+    return typeof response?.text === 'function' ? response.text() : '';
+}
+
+/**
+ * Returns the functionResponse role required by the target model family.
+ */
+function functionResponseRoleForModel(modelName) {
+    // Gemini 3.5+ requires role 'user' for functionResponse turns; legacy 2.x expects 'function'.
+    return /^gemini-2\./i.test(String(modelName || '')) ? 'function' : 'user';
+}
 
 const QUEST_AUTHOR_IDS = new Set(
     (process.env.QUEST_ADMIN_USER_IDS || '153904984621056001,810787678474862604,293499177718251522,115442945917714439,350990733806927872')
@@ -288,19 +336,41 @@ function registerMessageHandlers() {
             let responseText = null;
             let lastError = null;
 
-            for (const modelName of candidateModelNames) {
+            const nowTs = Date.now();
+            const activeCandidates = candidateModelNames.filter(
+                (m) => (modelCooldownUntil.get(m) || 0) <= nowTs
+            );
+            // If every model is currently in cooldown, try the one expiring soonest rather than failing flat.
+            const orderedModels = activeCandidates.length > 0
+                ? activeCandidates
+                : [...candidateModelNames].sort(
+                      (a, b) => (modelCooldownUntil.get(a) || 0) - (modelCooldownUntil.get(b) || 0)
+                  );
+
+            for (const modelName of orderedModels) {
                 let modelSuccess = false;
+                const fnRole = functionResponseRoleForModel(modelName);
+
                 for (let attempt = 1; attempt <= 2; attempt++) {
                     try {
                         const modelInstance = getModel(modelName);
-                        const chat = modelInstance.startChat({ history: validHistory });
+                        const contents = [
+                            ...validHistory,
+                            { role: 'user', parts: [{ text: userMsg }] }
+                        ];
 
-                        let result = await chat.sendMessage(userMsg);
+                        let result = await modelInstance.generateContent({ contents });
                         let response = result.response;
 
                         let toolIteration = 0;
                         while (response.functionCalls() && toolIteration < 5) {
                             toolIteration++;
+                            const rawModelParts = response.candidates?.[0]?.content?.parts || [];
+                            contents.push({
+                                role: 'model',
+                                parts: sanitizeModelParts(rawModelParts)
+                            });
+
                             const toolResults = [];
                             for (const call of response.functionCalls()) {
                                 logInfo('TOOL', `${call.name}(${JSON.stringify(call.args)}) [${modelName}] for ${message.author.tag}`);
@@ -331,30 +401,48 @@ function registerMessageHandlers() {
                                     }
                                 });
                             }
-                            result = await chat.sendMessage(toolResults);
+
+                            contents.push({ role: fnRole, parts: toolResults });
+                            result = await modelInstance.generateContent({ contents });
                             response = result.response;
                         }
 
-                        responseText = response.text();
+                        responseText = extractResponseText(response);
+                        modelCooldownUntil.delete(modelName);
                         modelSuccess = true;
                         break;
                     } catch (err) {
                         lastError = err;
-                        const status = err.status || (err.message && err.message.match(/\[(\d{3})\]/)?.[1]);
-                        const isTransient = status == 503 || status == 429 || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || (err.message && err.message.includes('fetch failed'));
+                        const errMsg = String(err?.message || err || '');
+                        const status = err?.status || errMsg.match(/\[(\d{3})\]/)?.[1];
 
-                        logWarn('AI', `Model ${modelName} attempt ${attempt} failed: ${err.message}`);
+                        logWarn('AI', `Model ${modelName} attempt ${attempt} failed: ${errMsg}`);
+
+                        if (Number(status) === 429) {
+                            const ttlMs = compute429CooldownMs(errMsg);
+                            modelCooldownUntil.set(modelName, Date.now() + ttlMs);
+                            logWarn('AI', `Cooling down ${modelName} for ${Math.round(ttlMs / 1000)}s after HTTP 429.`);
+                            break;
+                        }
+
+                        const isTransient =
+                            Number(status) === 503 ||
+                            err?.code === 'ECONNRESET' ||
+                            err?.code === 'ETIMEDOUT' ||
+                            errMsg.includes('fetch failed') ||
+                            errMsg.includes('operation was aborted');
+
                         if (attempt < 2 && isTransient) {
-                            await new Promise(r => setTimeout(r, 1500));
+                            await new Promise((r) => setTimeout(r, 1500));
                         } else {
                             break;
                         }
                     }
                 }
-                if (modelSuccess && responseText) break;
+                if (modelSuccess && responseText && responseText.trim()) break;
             }
 
-            if (!responseText) {
+            if (!responseText || !responseText.trim()) {
                 throw lastError || new Error("All AI models failed to respond");
             }
 
@@ -386,4 +474,10 @@ function registerMessageHandlers() {
     });
 }
 
-module.exports = { registerMessageHandlers };
+module.exports = {
+    registerMessageHandlers,
+    compute429CooldownMs,
+    sanitizeModelParts,
+    extractResponseText,
+    functionResponseRoleForModel
+};
