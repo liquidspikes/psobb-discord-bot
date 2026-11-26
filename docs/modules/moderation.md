@@ -3,25 +3,25 @@
 > Admin bulk-delete of recent messages in the channel where it's run.
 
 ## Responsibility
-`handleClearCommand(message)` — validate, optionally confirm, and `bulkDelete` up to `<count>` messages.
+`handleClearCommand(message)` — validate (`!clear <count>` or `!clear skip <n>`), optionally confirm, and `bulkDelete` recent messages.
 
 ## Exports
 | Symbol | Description |
 | --- | --- |
-| `handleClearCommand(message)` | The `!clear <count>` / `!purge <count>` command. |
+| `handleClearCommand(message)` | The `!clear <count|skip n>` / `!purge <count|skip n>` command. |
 
 ## Constants
 - `MAX_CLEAR = 500` (hard cap), `CONFIRM_THRESHOLD = 100`, `CONFIRM_TIMEOUT_MS = 30000`.
 
 ## Depends on
-[`actionLog`](actionLog.md).
+[`actionLog`](actionLog.md), [`permissions`](permissions.md).
 
 ## Depended on by
-[`messageHandler`](messageHandler.md).
+[`commands`](commands.md).
 
 ## Key behaviors / gotchas
 - Requires Administrator (the user) **and** Manage Messages (the bot) in that channel.
-- Count is required and explicit; capped at 500.
+- Count is required and explicit (capped at 500); `skip <n>` skips the newest `n` messages and deletes up to 100 behind them.
 - Clears > 100 require a **react-to-confirm** (✅ within 30s) from the issuing admin only.
 - `bulkDelete(n, true)` filters messages > 14 days (Discord can't bulk-delete those); the confirmation note self-deletes.
 - Every use is logged (`MOD` category): who, how many, where.

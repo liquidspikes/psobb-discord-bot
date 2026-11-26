@@ -10,6 +10,9 @@ Construct and export one `Client` with a broad intents bitfield (`3276799`) and 
 | --- | --- | --- |
 | `client` | `Client` | The shared gateway client. |
 
+## Depends on
+[`permissions`](permissions.md) (lazy helper require).
+
 ## Depended on by
 [`bot.js`](bot.md), [`messageHandler`](messageHandler.md), [`tools`](tools.md), [`system`](system.md), [`partyRooms`](partyRooms.md), [`tekkerChallenge`](tekkerChallenge.md), [`lfg`](lfg.md).
 

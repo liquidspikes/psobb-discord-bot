@@ -24,6 +24,9 @@ Faithfully mirrors the website logic so behaviour matches the real backend:
 - **`getClaimLog` is always empty.** Weapon redemption (combining tokens into an item) happens on the **website** player dashboard (`claim_tekker_drop.php`), which the bot can't replicate — so no claim-log rows are produced locally.
 - Won tokens are **local test tokens** that live only in this JSON file; they do **not** exist on the live website. [`tekkerChallenge`](tekkerChallenge.md) surfaces this to players (a "🧪 TEST MODE" field on the drop announcement and a notice on every win) so no one mistakes them for real rewards.
 
+## Depends on
+[`config`](config.md), [`actionLog`](actionLog.md), [`jsonStore`](jsonStore.md), [`pso`](pso.md) (`WEAPON_ATTR_CATEGORIES`).
+
 ## Depended on by
 [`tekkerDb`](tekkerDb.md) (only when local mode is on; required lazily so production never loads it).
 

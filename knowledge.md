@@ -59,7 +59,7 @@ Years after the events of Ep1 and Ep2, a new threat arrives from the stars.
 Characters are defined by three aspects: Profession (Hunter, Ranger, Force), Species (Human, Newman, Android), and Gender.
 
 ### Species Differences
-*   **Humans (HUmar, HUnl, RAmar, RAmarl, FOmar, FOmarl):** Balanced stats. Highest Material Limit (250).
+*   **Humans (HUmar, RAmar, RAmarl, FOmar, FOmarl):** Balanced stats. Highest Material Limit (250).
 *   **Newmans (HUnewearl, FOnewm, FOnewearl):** Tech-focused. Naturally regenerate TP while standing still. Lower Material Limit (150).
 *   **Androids (HUcast, HUcaseal, RAcast, RAcaseal):** Cannot use Techniques but can use Traps. Regenerate HP while standing still. Immune to Poison and Paralysis. 
     *   *Ultimate Difficulty Bonus:* +30% to status effect activation rates (Freeze/Paralyze/Confuse).

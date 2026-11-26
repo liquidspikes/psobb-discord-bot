@@ -5,7 +5,7 @@ _Generated: 2026-06-08 · Updated: 2026-06-08 (follow-up session)_
 > **Follow-up changes since generation** (this session): tekker activity scanner gated behind `isFeatureUp('tekker')` + `tekker_db` error logging made circuit-breakered (log flood fixed); lurker badges reworked into tiers (`👀`/`⚠️👀`/`❗👀`); `!sync all` and `!interactions` **fully separated** (sync = linked players/💠 only; `!interactions build [deep]` owns the scan + census + eyes badges); 💠 now always overwrites eyes when a member becomes linked; vestigial roleSync exports trimmed; all living docs updated to match. Items below reflect the current state.
 
 ## Scope reviewed
-- **Bot** (`psobb-discord-bot`): `bot.js` + all 21 modules under `src/`, configuration, and docs.
+- **Bot** (`psobb-discord-bot`): `bot.js` + all 25 modules under `src/` (including `jsonStore.js`), `tests/smoke.test.js`, configuration, and docs.
 - **Website** (`psobb.io-website-public`): every bot-facing API endpoint — `bot_api.php`, `bot_tekker_db.php`, `get_drops.php`, `summary.php`, the `.htaccess` rewrite layer, and the section-ID/class maps the bot consumes.
 
 All bot JavaScript passes `node --check` (no syntax errors). The architecture is clean: `bot.js` only wires events; each concern is isolated in its own module with consistent action-logging and defensive `try/catch` so one subsystem failing can't take down the others.
@@ -30,16 +30,8 @@ All bot JavaScript passes `node --check` (no syntax errors). The architecture is
 
 ## Bugs found
 
-### 🔴 1. `!quests` is broken — shadowed by the deprecated `!quest` handler _(still open)_
-`src/messageHandler.js:258`
-```js
-if (message.content.startsWith('!quest') || message.content.startsWith('$quest')) {
-    return await message.reply("📡 Notice: ...deprecated...");
-}
-```
-`"!quests".startsWith("!quest")` is `true`, so `!quests` returns the *deprecated* notice and never reaches the AI handler at line 299. The README (line 96) and the line-299 routing both clearly intend `!quests` to call `get_player_info`. **A documented player command is dead.**
-
-**Fix:** make the deprecation match exactly — e.g. `/^!quest(\s|$)/` / `/^\$quest(\s|$)/`, or move the `!quests`/`!progress`/`!progression`/`!stats` check above the `!quest` check.
+### 🔴 1. `!quests` shadowed by deprecated `!quest` handler — ✅ FIXED
+> **Resolved.** `src/commands.js` now uses word-boundary matching (`/^[!$]quest(\s|$)/i`) for the deprecated `!quest`/`$quest` entry, so `!quests` passes cleanly through to the AI handler (`tests/smoke.test.js` verifies this).
 
 ### 🔴 2. Greenill-section players never get their Section ID role or color — ✅ FIXED (2026-06-08)
 > **Resolved.** `bot_api.php` `$SECID_MAP` now returns single-n `Greenill`, and the online-overlay path normalizes the raw newserv `Greennill → Greenill`. The bot's `normalizeSectionId` (`src/pso.js`) now also accepts the double-n form as a guard. Verified.
@@ -76,31 +68,24 @@ Currently **dormant**, because `bot_api.php` returns class as a *string name*, a
 
 ## Foreseeable issues / risks
 
-1. **Gemini model id `"gemini-3.5-flash"`** (`src/model.js:10`) — **verify this is a real, enabled model** on your API key. If the id is wrong, *every* AI reply throws and users only ever see the "Communication Interrupted" fallback. This is the single highest-impact thing to confirm before trusting the AI features.
+1. **Gemini model configuration & fallback (`src/model.js` + `src/messageHandler.js`)** — ✅ **RESOLVED**. Replaced the stale single model ID with an ordered `candidateModelNames` fallback chain (respecting optional `config.gemini_model` override), per-model `thinkingConfig`, HTTP `429` cooldown tracking, and role-safe `functionResponse` turns.
 
-2. **Hardcoded absolute path for the vote tools** (`src/tools.js:13` — `VOTE_SCRIPTS_DIR = '/home/alexzimmerman/gemini-psobb-scripts'`, used at lines 136/168/196–197): now centralized in one const (was three inline literals) but **still hardcoded**, tied to one machine/user. If the deploy path differs, `get_active_vote_status` / `get_recent_votes` silently return "No active vote." Move to config.
+2. **Hardcoded absolute path for the vote tools** (`src/tools.js` — `VOTE_SCRIPTS_DIR = '/home/alexzimmerman/gemini-psobb-scripts'`): centralized in one constant and gated by `healthcheck.js`, though still hardcoded to one host path.
 
-3. **`agent_state.json` is not in the repo** — only `agent_state.json.bak`. `get_decryption_status` fetches the live `.json`, which an external pipeline must generate. Also note the `.htaccess` `^([^\.]+)$` rewrite won't touch a path containing a dot, so the real file must physically exist at `api/agent_state.json`. Fails gracefully if absent, but the decryption tool is non-functional until that file is produced.
+3. **`agent_state.json` is not in the website repo** — only `agent_state.json.bak` exists statically. `get_decryption_status` fetches the live `.json` produced externally and fails gracefully if absent.
 
-4. **Hardcoded Discord IDs**: `BOOSTER_ROLE_ID` (`tekkerChallenge.js:32`) has **no config override** (unlike the party/LFG/community IDs, which at least fall back through config). These tie the code to one specific guild — fine for a single-server deploy, but document it.
+4. **Hardcoded Discord IDs**: `BOOSTER_ROLE_ID` (`tekkerChallenge.js`) and `ADMIN_AGENT_CHANNEL_ID` default (`messageHandler.js`) — document when deploying to a different guild.
 
-5. **Legacy SDK**: `@google/generative-ai` is the deprecated package (superseded by `@google/genai`). Works today; plan a migration.
+5. **Legacy SDK**: `@google/generative-ai` is superseded by `@google/genai`, though functional today with the multi-model fallback wrapper in `messageHandler.js`.
 
-6. **No real test runner**: `package.json` `test` is a stub and there are no automated test scripts (the previously-referenced `scratch/test_*.js` no longer exist). The boot `selfCheck` partially compensates for the role-sync path; `diag_get_player.js` / `test_api.js` at the repo root are manual API probes, not tests.
+6. **Automated smoke test runner (`tests/smoke.test.js`)** — ✅ **ADDED** (`npm test` runs `NODE_ENV=test node tests/smoke.test.js` without needing external network/Discord tokens). Removed obsolete manual root scratch probes (`diag_get_player.js`, `test_api.js`, `get_player_all_slots.patch`).
 
-7. **Minor**: `handledMessages` dedup set is hard-cleared at >1000 entries (`messageHandler.js:49`), creating a tiny window where a just-seen message could be reprocessed. Low impact; a FIFO/TTL eviction would be cleaner.
+7. **Minor**: `handledMessages` dedup set is hard-cleared at >1000 entries (`messageHandler.js`), creating a tiny window where a just-seen message could be reprocessed. Low impact; a FIFO/TTL eviction would be cleaner.
 
-8. **`!help` doc mismatch** — ✅ FIXED (2026-06-08). The README previously said "`!help` is intentionally left for the website," but `messageHandler.js:284` routes `!help` (alias of `!commands`) to `handleHelpCommand`. The README now documents `!help` as a `!commands` alias.
+8. **`!help` doc mismatch** — ✅ FIXED (2026-06-08). The README previously said "`!help` is intentionally left for the website," but `commands.js` routes `!help` (alias of `!commands`) to `handleHelpCommand`.
 
 ---
 
 ## Bottom line
 
-The codebase is **well-structured, defensively written, and largely functional** — failure isolation, mention-injection guards, permission gating, and the boot self-check are all above the bar for a hobby bot. Nothing is architecturally broken.
-
-Before calling it fully verified, address in priority order:
-
-1. **Confirm the Gemini model id** (risk #1) — gates all AI functionality.
-2. ~~Fix the `Greennill`/`Greenill` mismatch (bug #2)~~ — ✅ fixed 2026-06-08.
-3. **Fix the `!quests` shadowing** (bug #1) — one-line change restoring a documented command. _(still open)_
-4. ~~Correct the `pso.js` class IDs (bug #3)~~ — ✅ fixed 2026-06-08. Still open: externalize the hardcoded vote paths / booster role (risks #2, #4).
+The codebase is **well-structured, defensively written, and largely functional** — failure isolation, mention-injection guards, permission gating, smoke tests, and the boot self-check are all in place. Remaining items to tackle later are externalizing the hardcoded vote paths / booster role (risks #2, #4) and eventually migrating from `@google/generative-ai` to `@google/genai` (risk #5).

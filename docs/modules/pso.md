@@ -1,9 +1,9 @@
 # `src/pso.js` — Game-data constants & normalizers
 
-> Pure functions/data shared by session detection and role sync. No side effects, no I/O.
+> Pure game-data constants, emoji/label constants, and lookup helpers shared across role sync, commands, LFG/party rooms, and Tekker. No side effects, no I/O.
 
 ## Responsibility
-Canonical PSOBB class/section/level data and the normalizers that turn raw API values into the names the Discord roles use.
+Canonical PSOBB class/section/level/attribute data, Discord role resolution, and normalizers that turn raw API values into Discord role names.
 
 ## Exports
 | Symbol | Description |
@@ -13,12 +13,16 @@ Canonical PSOBB class/section/level data and the normalizers that turn raw API v
 | `SECTION_ID_NAMES` | the 10 Section ID names (single-n `Greenill`). |
 | `LEVEL_ROLE_NAMES` | `Rookie`, `LVL10`…`LVL200`. |
 | `MANAGED_ROLE_NAMES` | lowercased set of every role the bot may manage. |
+| `WEAPON_ATTR_CATEGORIES` | `['Native', 'A.Beast', 'Machine', 'Dark', 'Hit']`. |
+| `WEAPON_ATTR_EMOJIS` | Category → standard emoji (`🗡️`, `🐾`, `🤖`, `👻`, `🎯`). |
+| `TEKKER_MASKED_WEAPON` | Shared `'❓ SPECIAL WEAPON'` label. |
 | `normalizeSectionId(v)` | string/number → canonical Section name or `null`. |
 | `normalizeClass(v)` | string/number → subclass name or `null`. |
 | `levelRoleName(level)` | level → `Rookie`/`LVL<n>`. |
+| `resolveGuildRole(guild, idOrName)` | Look up a guild role by exact ID or case-insensitive name. |
 
 ## Depended on by
-[`session`](session.md), [`roleSync`](roleSync.md).
+[`session`](session.md), [`roleSync`](roleSync.md), [`commands`](commands.md), [`lfg`](lfg.md), [`partyRooms`](partyRooms.md), [`tekkerChallenge`](tekkerChallenge.md), [`tekkerLocalStore`](tekkerLocalStore.md).
 
 ## Key behaviors / gotchas
 - `normalizeSectionId` accepts newserv's double-n **`Greennill`** and maps it to single-n `Greenill` (matches the website's other endpoints + the Discord role). See `CODE_REVIEW_REPORT.md` bug #2.

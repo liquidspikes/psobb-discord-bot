@@ -1,8 +1,8 @@
 // Storage layer for the Discord Tekker Challenge — backed by the website's PHP
-// API (bot_api.php action=tekker_db), NOT a local database. This keeps the bot
-// free of any native (sqlite3) dependency; the website's SQLite DB is the single
-// store. The exported function surface matches the original local-DB module, so
-// callers (tekkerChallenge.js, messageHandler.js) are unchanged.
+// API (api/bot_tekker_db.php), NOT a local database. This keeps the bot free of
+// any native (sqlite3) dependency; the website's SQLite DB is the single store
+// (with an optional in-process JSON fallback in tekkerLocalStore.js). Callers:
+// tekkerChallenge.js, commands.js, healthcheck.js, bot.js.
 const axios = require('axios');
 const { config } = require('./config');
 const { logInfo, logWarn, logError } = require('./actionLog');
@@ -82,16 +82,14 @@ async function call(op, params = {}) {
             timeout: 8000,
         });
         if (resp.data && resp.data.success) {
-            if (op !== 'ping') noteSuccess();
+            noteSuccess();
             return resp.data.result;
         }
-        // 'ping' is a deliberate probe (healthcheck/initDb do their own logging) —
-        // keep it out of the breaker so it stays silent and doesn't double-log.
-        if (op !== 'ping') noteFailure(`${op} → ${(resp.data && resp.data.error) || 'unknown error'}`);
+        noteFailure(`${op} → ${(resp.data && resp.data.error) || 'unknown error'}`);
         return null;
     } catch (e) {
         const status = e.response ? e.response.status : null;
-        if (op !== 'ping') noteFailure(`${op}${status ? ` [${status}]` : ''} → ${e.message}`);
+        noteFailure(`${op}${status ? ` [${status}]` : ''} → ${e.message}`);
         return null;
     }
 }
@@ -137,11 +135,7 @@ async function initDb() {
     logError('TEKKER', `Storage backend ${cap.reachable ? 'out of date' : 'unreachable'} at startup${cap.detail ? ` (${cap.detail})` : ''} — auto-fallback disabled, Tekker will be degraded.`);
 }
 
-// Lightweight reachability probe used at startup (initDb). Returns the raw ping
-// result ({ ok: true }) or null on failure, without logging.
-const ping = () => call('ping');
-
-// Diagnostic probe for the dependency health check. Unlike ping(), it does NOT
+// Diagnostic probe for the dependency health check. Returns { ok, detail } where detail carries the HTTP
 // swallow the reason: it returns { ok, detail } where detail carries the HTTP
 // status, response body, and the endpoint PATH — so a failed !health report shows
 // whether the endpoint 403'd, threw a schema/DB error, or the derived path is
@@ -211,13 +205,11 @@ async function getAllTokens() { const r = await call('getAllTokens'); return Arr
 // deleted from the live store on claim, so this log is the record of claimed rewards.
 async function getClaimLog(limit) { const r = await call('getClaimLog', limit ? { limit } : {}); return Array.isArray(r) ? r : []; }
 const transferToken = (tokenId, newOwnerId) => call('transferToken', { tokenId, newOwnerId });
-const markTokenClaimed = (tokenId, claimerId) => call('markTokenClaimed', { tokenId, claimerId });
 // Admin DB adjustments
 const deleteToken = (tokenId) => call('deleteToken', { tokenId });
 
 module.exports = {
     initDb,
-    ping,
     pingDetailed,
     getActiveDrop,
     createDrop,
@@ -240,7 +232,6 @@ module.exports = {
     getAllTokens,
     getClaimLog,
     transferToken,
-    markTokenClaimed,
     deleteToken,
 };
 

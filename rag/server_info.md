@@ -20,7 +20,7 @@ Determined by character name at creation. Affects item drop tables.
 
 ## Server Information: PSOBB.io
 - **Server Version:** Blue Burst (Episode 1, 2, and 4).
-- **Rates:** Check `!rates` or the website sidebar for live EXP and Drop multipliers.
+- **Rates:** Ask Hex for live server rates or check `/stats` on the website.
 - **Commands:**
   - `/alt` or `/account`: Switch characters on the fly.
   - `/lobby`: Return to lobby.

@@ -14,7 +14,7 @@ Returns the full server drop tables. **Not** Bearer-authed (public GET); cached 
 ```json
 { "success": true, "data": [ { "item": "...", "monster": "...", "difficulty": "Ultimate", "section_id": "Skyly", "episode": 1, ... } ] }
 ```
-The bot filters `data` by item/monster/difficulty/section_id/episode in `search_drops` and caps results at 40.
+The bot filters `data` by item/monster/difficulty/section_id/episode in `search_drops` and caps results at 25.
 
 ## Key behaviors / gotchas
 - Normalizes newserv's `Greennill → Greenill` (single-n) for `section_id` — matches [`pso.js`](../modules/pso.md) and the section role names. So `search_drops`' `section_id` filter should use single-n `Greenill`.

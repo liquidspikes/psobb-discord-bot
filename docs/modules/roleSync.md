@@ -11,17 +11,18 @@
 ## Exports (consumed by other modules)
 | Symbol | Description |
 | --- | --- |
-| `startRoleSync(guild)` | Start the periodic tick (`role_sync.interval_minutes`). |
+| `startRoleSync(guild)` | Start the periodic character role-sync tick (`role_sync.interval_minutes`) + fast online-presence role loop (`online_role_interval_seconds`). |
 | `selfCheck` | Boot integrity gate (pure; throws on failure). |
-| `handleSyncCommand` / `handleSyncAllCommand` | `!sync` (self) / `!sync all` (every **linked** player; no history scan, no eyes). |
+| `isUserLinked(userId)` | Returns whether a Discord user is present in `linked_roster.json`. |
+| `handleSyncCommand` / `handleSyncAllCommand` | `!sync` (self, member) / `!sync all` (`canSupport`, every **linked** player; no history scan, no eyes). |
 | `handleLockCommand` / `handleNicknameCommand` | `!lock`/`!unlock` secid\|nickname; `!nickname`. |
-| `handleHelpCommand` | `!commands`/`!help` (admins also get a DM of admin commands). |
-| `handleRolesCommand` / `handleChannelsCommand` | `!roles` / `!channels` DM audits. |
+| `handleHelpCommand` | `!commands`/`!help` (support/admins also get a DM of staff commands). |
+| `handleRolesCommand` / `handleChannelsCommand` | `!roles` / `!channels` DM audits (`canSupport`). |
 | `dmAdminReport` | DM chunker for audit reports. |
 | `runLurkerPass(guild, onProgress)` | Apply the tiered eyes badge to all unlinked members. Called by `!interactions build`. |
 
 ## Key internals (not exported — used only within this module / by `selfCheck`)
-`syncMember` (core role+nick apply), `selectProfile`, `computeTargetRoleNames`, `isStrippableRole`, `isLinked`, `buildManagedNick`, `applyLurkerBadge` (single-member eyes), `isLurkerExempt`, `auditGuildRoles`/`auditGuildChannels`.
+`syncMember` (core role+nick apply), `runOnlinePresenceTick` (grants/removes `ONLINE_ROLE_ID` for linked players currently online in-game), `selectProfile`, `computeTargetRoleNames`, `isStrippableRole`, `isLinked`, `buildManagedNick`, `applyLurkerBadge` (single-member eyes), `isLurkerExempt`, `auditGuildRoles`/`auditGuildChannels`.
 
 ## Data / files touched
 - `MEMORY_DIR/linked_roster.json` — known-linked Discord IDs (sync fallback).
@@ -29,13 +30,13 @@
 - `MEMORY_DIR/role_sync_locks.json` — per-user `{ secid?, nickname? }` locks.
 
 ## Config keys
-`role_sync.{enabled,interval_minutes,guild_id,nickname_level,nickname_prefix(💠),nickname_prefix_lurker(👀),lurker_exempt_roles,protected_roles}`.
+`role_sync.{enabled,interval_minutes,guild_id,nickname_level,nickname_prefix(💠),nickname_prefix_lurker(👀),online_role_id,online_role_interval_seconds,support_roles,lurker_exempt_roles,protected_roles}`.
 
 ## Depends on
-[`config`](config.md), [`api`](api.md), [`actionLog`](actionLog.md), [`interactions`](interactions.md) (`lurkerTier`), [`pso`](pso.md). Note: `interactions` lazily requires this module back (`runLurkerPass`) — a deliberate cycle resolved via lazy `require` inside the command handler.
+[`config`](config.md), [`api`](api.md), [`actionLog`](actionLog.md), [`jsonStore`](jsonStore.md), [`interactions`](interactions.md) (`lurkerTier`), [`permissions`](permissions.md), [`notificationPrefs`](notificationPrefs.md), [`pso`](pso.md) (`resolveGuildRole`, normalizers). Note: `interactions` lazily requires this module back (`runLurkerPass`) — a deliberate cycle resolved via lazy `require` inside the command handler.
 
 ## Depended on by
-[`bot.js`](bot.md), [`messageHandler`](messageHandler.md).
+[`bot.js`](bot.md), [`commands`](commands.md), [`interactions`](interactions.md), [`tekkerChallenge`](tekkerChallenge.md) (`isUserLinked`).
 
 ## Key behaviors / gotchas
 - **Never strips:** roles with any permission, `r.managed` (integration/booster), roles above the bot, or anything in `protected_roles`.

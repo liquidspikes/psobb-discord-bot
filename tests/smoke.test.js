@@ -59,7 +59,10 @@ require('../src/interactions');
 require('../src/partyRooms');
 require('../src/lfg');
 require('../src/socialMemory');
-require('../src/commands');
+const commandsMod = require('../src/commands');
+const modelMod = require('../src/model');
+const messageHandlerMod = require('../src/messageHandler');
+const healthcheckMod = require('../src/healthcheck');
 
 // 1. pso.js shared constants and normalizers
 assert.strictEqual(SECTION_ID_NAMES.length, 10);
@@ -130,4 +133,54 @@ assert.strictEqual(typeof roleSync.isUserLinked, 'function');
 assert.strictEqual(typeof tekkerChallenge.isUserLinked, 'function');
 assert.strictEqual(tekkerChallenge.isUserLinked('999999999999999999'), false);
 
-console.log('ALL SMOKE TESTS PASSED');
+// 5. model.js fallback chain, generation config & removed dead exports
+assert.strictEqual(modelMod.model, undefined, 'Unused default model export should be removed');
+assert.strictEqual(modelMod.genAI, undefined, 'Unused genAI export should be removed');
+assert.ok(Array.isArray(modelMod.candidateModelNames) && modelMod.candidateModelNames.length >= 2);
+assert.deepStrictEqual(modelMod.buildGenerationConfig('gemini-3.5-flash-lite'), { thinkingConfig: { thinkingLevel: 'MINIMAL' } });
+assert.deepStrictEqual(modelMod.buildGenerationConfig('gemma-4-31b-it'), { thinkingConfig: { thinkingLevel: 'MINIMAL' } });
+assert.deepStrictEqual(modelMod.buildGenerationConfig('gemini-2.5-flash'), {});
+
+// 6. messageHandler.js Gemini 3/Gemma vs 2.x turn helpers
+assert.strictEqual(messageHandlerMod.functionResponseRoleForModel('gemini-2.5-flash'), 'function');
+assert.strictEqual(messageHandlerMod.functionResponseRoleForModel('gemini-3.5-flash-lite'), 'user');
+assert.strictEqual(messageHandlerMod.functionResponseRoleForModel('gemma-4-31b-it'), 'user');
+assert.ok(messageHandlerMod.compute429CooldownMs('PerDay quota exceeded') >= 3600 * 1000);
+assert.strictEqual(messageHandlerMod.compute429CooldownMs('{"retryDelay":"12s"}'), 17000);
+const sanitized = messageHandlerMod.sanitizeModelParts([
+    { thought: true, text: '' },
+    { thought: true, thoughtSignature: 'sig123' },
+    { functionCall: { name: 'get_server_stats', args: {} } },
+]);
+assert.strictEqual(sanitized.length, 2);
+assert.strictEqual(
+    messageHandlerMod.extractResponseText({
+        candidates: [{ content: { parts: [{ thought: true, text: 'hidden' }, { text: 'visible reply' }] } }],
+    }),
+    'visible reply'
+);
+
+// 7. !quest vs !quests command routing + !trade registration & healthcheck integration
+const questEntry = commandsMod.registry.find((e) => e.name === 'quest');
+const questsEntry = commandsMod.registry.find((e) => e.name === 'quests');
+const tradeEntry = commandsMod.registry.find((e) => e.name === 'trade');
+assert.ok(questEntry && questsEntry && tradeEntry);
+assert.strictEqual(questEntry.match('!quest'), true);
+assert.strictEqual(questEntry.match('$quest check'), true);
+assert.strictEqual(questEntry.match('!quests'), false, '!quest must not shadow !quests');
+assert.strictEqual(questsEntry.match('!quests'), true);
+assert.strictEqual(questsEntry.passthrough, true);
+assert.strictEqual(tradeEntry.match('!trade @user T-1 T-2'), true);
+assert.strictEqual(healthcheckMod.isFeatureUp('tekker'), true);
+
+(async () => {
+    // Clean up any smoke test log side-effect only as needed; verify !quests passthrough dispatches false
+    const consumedQuests = await commandsMod.dispatch({ content: '!quests', author: { tag: 'SmokeTest', id: '0' } });
+    assert.strictEqual(consumedQuests, false, '!quests should fall through to AI handler');
+    const gatedTrade = await healthcheckMod.gateCommand({ content: '!trade @user T-1 T-2', reply: async () => {} });
+    assert.strictEqual(gatedTrade, false);
+    console.log('ALL SMOKE TESTS PASSED');
+})().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

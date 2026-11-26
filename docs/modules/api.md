@@ -16,7 +16,7 @@
 [`config`](config.md), [`actionLog`](actionLog.md), `axios`.
 
 ## Depended on by
-[`session`](session.md), [`roleSync`](roleSync.md), [`tools`](tools.md), [`lfg`](lfg.md), [`partyRooms`](partyRooms.md).
+[`session`](session.md), [`roleSync`](roleSync.md), [`tools`](tools.md), [`lfg`](lfg.md), [`partyRooms`](partyRooms.md), [`healthcheck`](healthcheck.md).
 
 ## Key behaviors / gotchas
 - **Successful calls are not logged** (only failures), by design — the role-sync tick calls `get_player` for every roster member each cycle.

@@ -15,10 +15,10 @@
 | `announceStartup(guild, selfCheckResult?, healthSummary?)` | Boot DM to admins (incl. the [dependency health](healthcheck.md) summary). |
 
 ## Depends on
-[`discordClient`](discordClient.md), [`actionLog`](actionLog.md), `child_process.exec`.
+[`discordClient`](discordClient.md), [`actionLog`](actionLog.md), [`permissions`](permissions.md), [`notificationPrefs`](notificationPrefs.md) (`sendDM`), `child_process.exec`.
 
 ## Depended on by
-[`bot.js`](bot.md) (`announceStartup`), [`messageHandler`](messageHandler.md) (commands).
+[`bot.js`](bot.md) (`announceStartup`), [`commands`](commands.md) (`!restart`, `!pull`).
 
 ## Key behaviors / gotchas
 - **`!restart` only works under a supervisor** with auto-restart (systemd `Restart=always`); without one, it just stops the bot. See README "Running as a service".

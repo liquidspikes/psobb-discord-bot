@@ -6,12 +6,12 @@
 `call(op, params)` POSTs `{ op, ...params }` (Bearer-authed) and returns `result` (or `null` on failure). Thin typed wrappers expose each op; the export surface mirrors a local-DB module so callers are storage-agnostic.
 
 ## Exports (ops)
-`initDb` (ping) · `getActiveDrop` · `createDrop` · `deactivateDrop` · `shiftActiveDropStats` · `incrementDropGuesses` · `discoverSecondZero` · `pulseDespawnTime` · `getPlayerState` · `upsertPlayerState` · `addTelemetryLog` · `addActiveUser` · `getActiveUserCount` · `clearActiveUsers` · `getTriggerThreshold` · `setTriggerThreshold` · `createToken` · `getToken` · `getUnclaimedTokens` · `getAllTokens` · `getClaimLog` · `transferToken` · `markTokenClaimed` · `deleteToken`.
+`initDb` · `pingDetailed` · `LOCAL_MODE` (getter) · `getActiveDrop` · `createDrop` · `deactivateDrop` · `shiftActiveDropStats` · `incrementDropGuesses` · `discoverSecondZero` · `pulseDespawnTime` · `getPlayerState` · `upsertPlayerState` · `addTelemetryLog` · `addActiveUser` · `getActiveUserCount` · `clearActiveUsers` · `getTriggerThreshold` · `setTriggerThreshold` · `createToken` · `getToken` · `getUnclaimedTokens` · `getAllTokens` · `getClaimLog` · `transferToken` · `deleteToken`.
 
-Also exports **`ping()`** — a raw `ping` op (no logging) used by [`healthcheck`](healthcheck.md) to probe the tekker store at boot.
+`pingDetailed()` is used by [`healthcheck`](healthcheck.md) to probe the tekker store (`{ ok, local, error? }`); in local mode it returns `{ ok: true, local: true }`.
 
 ## Endpoint resolution
-`TEKKER_DB_URL` = `config.tekker_db_url` **or** `config.psobb_api_url` with `bot_api.php` → `bot_tekker_db.php`.
+`TEKKER_DB_URL` = `config.tekker_db_url` **or** `config.psobb_api_url` with `bot_api` (`.php` or extensionless pretty URL) → `bot_tekker_db.php`.
 
 ## Local test mode (+ auto-fallback)
 When in **local mode**, `call()` dispatches **synchronously** to [`tekkerLocalStore`](tekkerLocalStore.md) instead of POSTing, and `pingDetailed()` returns `{ok:true}` so the tekker feature stays enabled. This lets the whole `/guess` game (including ops the deployed site lacks) run with **no website**. Two triggers:
@@ -25,7 +25,7 @@ When in **local mode**, `call()` dispatches **synchronously** to [`tekkerLocalSt
 [`config`](config.md), [`actionLog`](actionLog.md), `axios`.
 
 ## Depended on by
-[`tekkerChallenge`](tekkerChallenge.md), [`commands`](commands.md) (`!tekker`/`!tokens`/`!trade` paths read tokens + `getClaimLog` directly), [`bot.js`](bot.md) (`initDb`).
+[`tekkerChallenge`](tekkerChallenge.md), [`commands`](commands.md) (`!tekker`/`!tokens`/`!trade` paths read tokens + `getClaimLog` directly), [`healthcheck`](healthcheck.md) (`pingDetailed`, `LOCAL_MODE`), [`bot.js`](bot.md) (`initDb`).
 
 ## Key behaviors / gotchas
 - 8s timeout; failures return `null`/`[]`/sensible defaults (e.g. threshold falls back to 30), so the minigame degrades instead of crashing.

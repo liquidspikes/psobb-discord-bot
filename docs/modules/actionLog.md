@@ -13,13 +13,16 @@
 | `logAction(category, message, level='info')` | Core writer. |
 | `logInfo / logWarn / logError(category, message)` | Convenience wrappers. |
 | `getRecentLogs(lines)` | Last N lines (prefers file, falls back to buffer). |
-| `handleLogCommand(message)` | The `!log` admin command (Administrator + guild only). |
+| `handleLogCommand(message)` | The `!log` staff command (`canSupport` + guild only). |
 
 ## Data / files touched
 - `MEMORY_DIR/actions.log` — capped at `FILE_MAX_LINES=10000`, trimmed to `FILE_TRIM_TO=8000`, checked every 200 writes.
 
 ## Categories
-`SYSTEM`, `COMMAND`, `ROLE-SYNC`, `API`, `DROPS`, `SESSION`, `TOOL`, `TEKKER`, `LFG`, `PARTY`, `MOD`, `INTERACT`, `AUDIT`.
+`SYSTEM`, `COMMAND`, `ROLE-SYNC`, `API`, `DROPS`, `SESSION`, `TOOL`, `TEKKER`, `LFG`, `PARTY`, `MOD`, `INTERACT`, `AUDIT`, `HEALTH`, `AI`, `NOTIFY`, `SOCIAL`.
+
+## Depends on
+[`config`](config.md), [`permissions`](permissions.md), [`notificationPrefs`](notificationPrefs.md) (`sendDM`).
 
 ## Depended on by
 Almost every module (logging is cross-cutting).

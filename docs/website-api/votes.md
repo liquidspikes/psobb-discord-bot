@@ -37,7 +37,7 @@ The startup [health check](../modules/healthcheck.md) probes the **directory** `
 3. **External generator dependency.** The directory probe confirms the path is readable, **not** that the external script is actually running and producing fresh votes. A stale/abandoned `current_vote.json` still passes and would be reported as a live vote.
 4. **JSON-shape coupling.** The bot hard-expects exactly `message_id`, `candidates`, `date` (and `scenario_id`, `title`, `desc`, `selection_method` in the applied files). If the external script renames a key, the bot reads `undefined` and returns an empty/garbled tally with no error.
 5. **Tally baseline + custom emoji.** `reaction.count` includes whatever account seeded the option emojis, so tallies can be offset by one; the handler doesn't subtract a baseline. If the poll uses **custom emojis**, `reaction.emoji.name` is the shortcode, which may not line up with how `candidates` are keyed, so the model can't map votes to options.
-6. **Upstream model age.** The bot uses `gemini-3.5-flash`, but the website's related `cron_community.php` still calls the retired `gemini-pro`. If the external vote generator shares that outdated model id, vote generation could be failing upstream (→ no `current_vote.json` produced).
+6. **Upstream model configuration.** The bot uses an ordered Gemini fallback chain configured in [`model.js`](../modules/model.md) (defaulting to high-capacity Flash Lite tiers), and the website's `cron_community.php` uses the configured `GEMINI_MODEL` env setting with model fallbacks rather than hardcoded legacy IDs.
 
 ## If you want to harden it further (not yet done)
 See **[`VOTING_SYSTEM.md`](../../VOTING_SYSTEM.md)** in the repo root for the full proposed fix (tiered):

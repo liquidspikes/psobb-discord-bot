@@ -7,7 +7,7 @@
 
 ## Behavior
 - `GET https://psobb.io<path>` (path forced to start with `/`).
-- Strips `<script>`/`<style>` blocks and all tags, collapses whitespace, truncates to **8000 chars**.
+- Strips `<script>`/`<style>` blocks and all tags, collapses whitespace, truncates to **4000 chars**.
 - The STRATEGIC DIRECTIVE in [`model.js`](../modules/model.md) instructs the AI to use this for `/missions` (bounties), `/lfg` (groups), and `/about`, and to share **clean URLs without `.php`**.
 
 ## Relevant pages (rendered by the website repo)

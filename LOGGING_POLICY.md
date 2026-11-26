@@ -42,7 +42,15 @@ These events are actively written to the console and to the action log for audit
 
 ### 5. Website API Failures & Diagnostic Warnings (`API` / `API-ERROR`)
 *   **Trigger**: Any HTTP connection failures, 500 server-side errors, or timeouts when calling the `psobb.io` API.
-*   **Example**: `[ERROR] [API] claim_tekker_drop [500] → Internal Server Error`
+*   **Example**: `[ERROR] [API] bot_tekker_db [500] → Internal Server Error`
+
+---
+
+### 6. Subsystem & Diagnostic Categories (`HEALTH`, `AI`, `NOTIFY`, `SOCIAL`, etc.)
+*   **`HEALTH`**: Startup dependency probes, `!health` re-probes, and offline-feature warnings.
+*   **`AI`**: Gemini model fallback retries, HTTP `429` cooldown skips, and tool-loop errors.
+*   **`NOTIFY`**: Per-user push notification preference changes (`!notify` / `/notify`) and failed DM fallbacks.
+*   **`SOCIAL`**: Long-term per-user social memory read/write errors (via `jsonStore`).
 
 ---
 
