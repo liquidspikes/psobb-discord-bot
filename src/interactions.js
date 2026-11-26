@@ -1,9 +1,9 @@
 // =====================================================================
 // INTERACTION LOG
-// A persistent record of every server user with a boolean: have they ever
-// commented or reacted in the server? Drives the nickname badge in role sync —
-// a linked member who has never interacted gets the 👀 lurker badge instead of
-// the 💠 linked badge, until their first message/reaction flips them to true.
+// A persistent record of every server user's last interaction epoch timestamp (plus
+// meta.lastFullScanAt). Linked members receive the 💠 badge regardless of
+// interaction; unlinked members receive tiered lurker badges (👀 / ⚠️👀 / ❗👀)
+// applied via `!interactions build [deep]` in roleSync.js.
 // Stored as JSON in the bot's memory dir (like the roster / locks).
 // =====================================================================
 const path = require('path');
@@ -77,7 +77,7 @@ function lurkerTier(id) {
     return meta.lastFullScanAt ? 'never' : 'warn';
 }
 
-// Flip a user to "interacted" on their first message/reaction, or refresh their timestamp.
+// Record/refresh a user's interaction timestamp on message/reaction.
 // Throttle writes: only save to disk if state shifts (lurker -> active) or if the
 // last timestamp update is older than 1 hour, preventing disk thrashing.
 function markInteracted(id) {
@@ -186,7 +186,7 @@ function stats() {
     return { total: log.size, interacted: activeCount, lurkers: log.size - activeCount };
 }
 
-// Admin command: "!interactions [build|check @user]" — manage/inspect the log.
+// Staff command: "!interactions [build [deep]|check @user]" — manage/inspect the log (build is admin-only).
 async function handleInteractionsCommand(message) {
     try {
         const parts = message.content.trim().split(/\s+/);

@@ -85,9 +85,9 @@ function getRecentLogs(lines) {
     return buffer.slice(-n);
 }
 
-// Admin command: "!log [lines]" — DM the requesting admin the most recent backend
-// actions. Defaults to 50 lines; "!log 200" pulls the last 200 (capped at the buffer
-// size). Excludes AI chatbot conversation, which is logged separately.
+// Staff command: "!log [lines]" — DM the requesting staff member the most recent backend
+// actions. Defaults to 50 lines; "!log 200" pulls up to FILE_MAX_LINES (10,000) lines.
+// Excludes AI chatbot conversation, which is logged separately in questions.log.
 async function handleLogCommand(message) {
     try {
         logInfo('COMMAND', `!log by ${message.author.tag} (${message.author.id})`);

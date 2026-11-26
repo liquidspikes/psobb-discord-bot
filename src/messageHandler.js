@@ -5,11 +5,11 @@ const path = require('path');
 const { Events } = require('discord.js');
 const { config, MEMORY_DIR } = require('./config');
 const { client } = require('./discordClient');
-const { model, getModel, candidateModelNames } = require('./model');
+const { getModel, candidateModelNames } = require('./model');
 const { toolHandlers } = require('./tools');
 const { loadSocialMemory } = require('./socialMemory');
 const { getCurrentPlayerSession } = require('./session');
-const { logInfo, logWarn } = require('./actionLog');
+const { logInfo, logWarn, logError } = require('./actionLog');
 const { isFeatureUp, featureForTool, toolDownResult } = require('./healthcheck');
 const commands = require('./commands');
 
@@ -82,10 +82,10 @@ async function safeReply(message, options) {
                     return await message.channel.send(options);
                 }
             } catch (chanErr) {
-                console.error('[SAFE_REPLY] Fallback channel send failed:', chanErr.message);
+                logWarn('SYSTEM', `Safe-reply channel send fallback failed: ${chanErr.message}`);
             }
         } else {
-            console.error('[SAFE_REPLY] Reply failed:', err.message);
+            logWarn('SYSTEM', `Safe-reply failed: ${err.message}`);
         }
     }
 }
@@ -131,7 +131,7 @@ function registerMessageHandlers() {
                     await interaction.reply({ content: '⚠️ The Tekker Challenge feature is currently down/unavailable.', ephemeral: true });
                 }
             } catch (e) {
-                console.error("[SLASH GUESS ERROR]", e);
+                logError('COMMAND', `/guess error: ${e.message}`);
                 try {
                     const msg = '⚠️ An error occurred while processing your guess.';
                     // processSlashGuess defers early, so by the time most errors fire the
@@ -179,7 +179,7 @@ function registerMessageHandlers() {
                     ephemeral: true
                 });
             } catch (e) {
-                console.error("[SLASH NOTIFY ERROR]", e);
+                logError('COMMAND', `/notify error: ${e.message}`);
                 try {
                     await interaction.reply({ content: '⚠️ An error occurred while managing notification preferences.', ephemeral: true });
                 } catch (_) {}
@@ -232,17 +232,15 @@ function registerMessageHandlers() {
             QUEST_AUTHOR_IDS.has(message.author.id) &&
             (QUEST_DM_RE.test(message.content || '') || hasQstAttachment)
         ) {
-            console.log(`[DM] Skipping Hex AI reply on quest-management DM from ${message.author.tag} (handled by Admin Agent)`);
+            logInfo('SYSTEM', `Skipping Hex AI reply on quest-management DM from ${message.author.tag} (handled by Admin Agent)`);
             return;
         }
-
-        console.log("[MSG] From: " + message.author.tag + " | Content: " + message.content);
 
         try {
             const logLine = `[${new Date().toISOString()}] ${message.author.tag}: ${message.content}\n`;
             fs.appendFileSync(path.join(MEMORY_DIR, 'questions.log'), logLine);
         } catch (e) {
-            console.error("Failed to append to questions.log:", e.message);
+            logWarn('SYSTEM', `Failed to append to questions.log: ${e.message}`);
         }
 
         try {
@@ -468,7 +466,7 @@ function registerMessageHandlers() {
                 await safeReply(message, responseText);
             }
         } catch (e) {
-            console.error("[AI ERROR]", e.message);
+            logError('AI', `AI response failed: ${e.message}`);
             await safeReply(message, "📡 **Communication Interrupted:** Pioneer 2's link is experiencing interference.");
         }
     });

@@ -16,6 +16,7 @@ endpoints.** Start at [`bot.js`](modules/bot.md) (the entry point) and follow th
 | `src/config.js` | [config.md](modules/config.md) | Loads runtime config + shared filesystem paths. |
 | `src/healthcheck.js` | [healthcheck.md](modules/healthcheck.md) | Startup dependency probes + per-feature gating. |
 | `src/discordClient.js` | [discordClient.md](modules/discordClient.md) | The shared discord.js `Client` instance. |
+| `src/jsonStore.js` | [jsonStore.md](modules/jsonStore.md) | Safe JSON read + atomic `.tmp` rename write helper. |
 | `src/actionLog.js` | [actionLog.md](modules/actionLog.md) | Central action log (console + ring buffer + file) and `!log`. |
 | `src/api.js` | [api.md](modules/api.md) | PSOBB server API calls + 30-min drops cache. |
 | `src/knowledgeBase.js` | [knowledgeBase.md](modules/knowledgeBase.md) | Builds the static knowledge-base string for the model. |
@@ -60,4 +61,4 @@ the bot repo.
 - [`LOGGING_POLICY.md`](../LOGGING_POLICY.md) — what is/isn't logged.
 - [`COMMAND_LIST.md`](../COMMAND_LIST.md) — command reference.
 - [`VOTING_SYSTEM.md`](../VOTING_SYSTEM.md) — current vote setup + proposed better fix (see also [website-api/votes.md](website-api/votes.md)).
-- [`CODE_REVIEW_REPORT.md`](../CODE_REVIEW_REPORT.md) — known bugs & risks (some still open).
+- [`CODE_REVIEW_REPORT.md`](../CODE_REVIEW_REPORT.md) — code review notes & resolved/open items.

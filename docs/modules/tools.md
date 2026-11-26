@@ -11,6 +11,7 @@
 | --- | --- |
 | `tools` | Declarations (names, descriptions, parameter schemas). |
 | `toolHandlers` | Async handler per tool. |
+| `VOTE_SCRIPTS_DIR` | Directory constant probed by [`healthcheck`](healthcheck.md) and read by vote tools. |
 
 ## Tools
 | Tool | Backed by |
@@ -18,15 +19,18 @@
 | `get_player_info` | `apiCall('get_player')` → [`bot_api.php`](../website-api/bot_api.md) |
 | `get_online_players` | `apiCall('get_online_players')` |
 | `get_server_events` | `apiCall('get_events')` |
-| `fetch_website_content` | GET `https://psobb.io<path>`, HTML-stripped to 8000 chars → [website-pages](../website-api/website-pages.md) |
+| `fetch_website_content` | GET `https://psobb.io<path>`, HTML-stripped to 4000 chars → [website-pages](../website-api/website-pages.md) |
 | `update_social_memory` / `get_social_memory` | [`socialMemory`](socialMemory.md) (caps at 20 notes) |
 | `get_active_vote_status` / `get_recent_votes` | local JSON files (`VOTE_SCRIPTS_DIR`) + Discord reaction tallies → [votes](../website-api/votes.md) |
 | `get_decryption_status` | GET `https://psobb.io/api/agent_state.json` → [agent_state](../website-api/agent_state.md) |
-| `search_drops` | [`api`](api.md) `getDropsData` → [`get_drops.php`](../website-api/get_drops.md) (filters, limit 40) |
+| `search_drops` | [`api`](api.md) `getDropsData` → [`get_drops.php`](../website-api/get_drops.md) (filters, limit 25) |
 | `get_server_stats` | GET `https://psobb.io/api/summary` → [`summary.php`](../website-api/summary.md) |
 
 ## Depends on
 [`config`](config.md), [`discordClient`](discordClient.md), [`api`](api.md), [`socialMemory`](socialMemory.md), `axios`, `fs`.
+
+## Depended on by
+[`model`](model.md) (`tools`), [`messageHandler`](messageHandler.md) (`toolHandlers`), [`healthcheck`](healthcheck.md) (`VOTE_SCRIPTS_DIR`).
 
 ## Key behaviors / gotchas
 - **Hard-coded absolute path** for the vote tools, now in one constant `VOTE_SCRIPTS_DIR = '/home/alexzimmerman/gemini-psobb-scripts'` (exported, also probed by [`healthcheck`](healthcheck.md)'s `vote_integration` dep). On a deploy where that dir is missing/unreadable, the `vote` feature is disabled and the tools report "voting offline" instead of silently saying "no vote". See [votes.md](../website-api/votes.md) for the full current setup + known issues, and `CODE_REVIEW_REPORT.md` risk #2.

@@ -44,10 +44,10 @@ registerMessageHandlers();
 client.once(Events.ClientReady, async (c) => {
     logInfo('SYSTEM', `Bot is live: ${c.user.tag}`);
 
-    // Initialize SQLite Tekker Database
+    // Probe Tekker API endpoint / fall back to local JSON store if unavailable
     try {
         await initDb();
-        // Register the slash command globally
+        // Register global slash commands
         // NOTE: set() replaces the ENTIRE global command list — any future global
         // slash command must be added to this array too, or it will be removed.
         await c.application.commands.set([
@@ -95,11 +95,6 @@ client.once(Events.ClientReady, async (c) => {
             }
         ]);
         logInfo('SYSTEM', 'Registered global slash commands.');
-        
-        if (isFeatureUp('tekker')) {
-            const { startDespawnWatcher } = require('./src/tekkerChallenge');
-            startDespawnWatcher();
-        }
     } catch (e) {
         logError('SYSTEM', `Failed to initialize tekker database / commands: ${e.message}`);
     }
@@ -126,6 +121,13 @@ client.once(Events.ClientReady, async (c) => {
         healthSummary = await runStartupChecks();
     } catch (e) {
         logError('SYSTEM', `Dependency health check failed: ${e.message}`);
+    }
+
+    if (isFeatureUp('tekker')) {
+        const { startDespawnWatcher } = require('./src/tekkerChallenge');
+        startDespawnWatcher();
+    } else {
+        logWarn('TEKKER', 'Despawn watcher NOT started — the tekker store is unavailable (see !health).');
     }
 
     try {

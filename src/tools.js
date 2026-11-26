@@ -5,6 +5,7 @@ const { config } = require('./config');
 const { client } = require('./discordClient');
 const { apiCall, getDropsData } = require('./api');
 const { loadSocialMemory, saveSocialMemory } = require('./socialMemory');
+const { logWarn } = require('./actionLog');
 
 // Base directory the external Mission Control vote generator writes its state to
 // (current_vote.json + the *.applied snapshots). This is exactly where the bot is
@@ -188,7 +189,7 @@ const toolHandlers = {
                         }
                     }
                 } catch (e) {
-                    console.error("Error loading active vote:", e.message);
+                    logWarn('SYSTEM', `Error loading active vote: ${e.message}`);
                 }
             }
 
@@ -212,7 +213,7 @@ const toolHandlers = {
                         }
                     };
                 } catch (e) {
-                    console.error("Error loading applied vote:", e.message);
+                    logWarn('SYSTEM', `Error loading applied vote: ${e.message}`);
                 }
             }
 

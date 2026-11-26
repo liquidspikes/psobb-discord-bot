@@ -3,14 +3,16 @@
 > Wires Discord gateway events to the feature modules and logs the client in. Contains no business logic itself.
 
 ## Responsibility
-- Register message handlers, then on `ClientReady`:
-  1. `initDb()` — connectivity check to the Tekker storage endpoint.
-  2. `selfCheck()` — boot integrity gate for the role-sync hot path; result is logged and DMed to admins.
-  3. `runStartupChecks()` — [dependency health check](healthcheck.md); the summary is folded into the admin DM. Each feature start below is guarded by `isFeatureUp(...)`.
-  4. Resolve the target guild (from `role_sync.guild_id` → `channel_id`'s guild → first guild).
-  5. `startRoleSync(guild)` **if `isFeatureUp('role_sync')`**, `announceStartup(guild, selfCheckResult, healthSummary)`, `startPartyRooms(guild)` **if `isFeatureUp('party_rooms')`**.
-  6. Start the **voice-activity tracking loop** (`setInterval`, 60s) **if `isFeatureUp('tekker')`**: scans guild voice channels and feeds active, non-bot, non-muted members in multi-person channels to `trackActivity(..., 'voice')`.
-  7. `startLfgWatcher()` **if `isFeatureUp('lfg')`**.
+- Set IPv4-first DNS resolution (`dns.setDefaultResultOrder('ipv4first')`) and attach global `unhandledRejection` / `uncaughtException` guards (`actionLog`).
+- Register message, reaction, and slash-command handlers (`registerMessageHandlers()`), then on `ClientReady`:
+  1. Register guild/global slash commands (`/guess`, `/notify`).
+  2. `initDb()` — connectivity + capability check for Tekker storage (with optional auto-local fallback).
+  3. `selfCheck()` — boot integrity gate for the role-sync hot path; result is logged and DMed to admins.
+  4. `runStartupChecks()` — [dependency health check](healthcheck.md); the summary is folded into the admin DM. Each feature start below is guarded by `isFeatureUp(...)`.
+  5. Resolve the target guild (from `role_sync.guild_id` → `channel_id`'s guild → first guild).
+  6. `announceStartup(guild, selfCheckResult, healthSummary)`, `startRoleSync(guild)` **if `isFeatureUp('role_sync')`**, `startPartyRooms(guild)` **if `isFeatureUp('party_rooms')`**, and `startDespawnWatcher()` **if `isFeatureUp('tekker')`**.
+  7. Start the **voice-activity tracking loop** (`setInterval`, 60s) **if `isFeatureUp('tekker')`**: scans guild voice channels (`c && ...` null-safe) and feeds active, non-bot, non-muted members in multi-person channels to `trackActivity(..., 'voice')`.
+  8. `startLfgWatcher()` **if `isFeatureUp('lfg')`**.
 - Each subsystem is wrapped in its own `try/catch` so one failing can't take down the others.
 
 ## Exports

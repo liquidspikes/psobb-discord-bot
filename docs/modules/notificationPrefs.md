@@ -16,6 +16,9 @@ Discord pings (DMs and channel mentions) buzz the recipient's phone by default. 
 | `sendDM(userOrMember, contentOrOptions, type='DM')` | Send a DM, appending `SuppressNotifications` to `flags` unless the user enabled `type`. Accepts a string or a message-options object; accepts a `User` or `GuildMember`. |
 | `prefs` | The raw `{userId: {...}}` dict, exported so background loops can iterate opted-in users without N lookups. |
 
+## Depends on
+[`config`](config.md), [`actionLog`](actionLog.md), [`jsonStore`](jsonStore.md).
+
 ## Depended on by
 - [`commands`](commands.md) (`!notify`) and [`messageHandler`](messageHandler.md) (`/notify` slash) — read/write prefs.
 - [`actionLog`](actionLog.md) (`!log`), [`roleSync`](roleSync.md) (help/audit DMs), [`system`](system.md) (startup admin DM) — route their DMs through `sendDM` (silent unless DM opted in).

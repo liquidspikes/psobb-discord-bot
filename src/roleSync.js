@@ -108,7 +108,7 @@ function computeTargetRoleNames(profile) {
 const warnedMissingRoles = new Set();
 function findGuildRole(guild, name) {
     if (!name) return null;
-    const role = guild.roles.cache.find((r) => r.name.toLowerCase() === name.toLowerCase());
+    const role = resolveGuildRole(guild, name);
     if (!role && !warnedMissingRoles.has(name.toLowerCase())) {
         warnedMissingRoles.add(name.toLowerCase());
         logWarn('ROLE-SYNC', `Missing role "${name}" in "${guild.name}" — create it so the bot can assign it.`);
@@ -200,7 +200,8 @@ function stripManagedPrefix(s) {
 
 // Build a linked member's managed nickname from a raw source string (their current
 // nickname, or a name passed to !nickname). `prefix` is the badge to apply (💠 for
-// interacted members, 👀 for lurkers). The "LVL<level>" suffix is appended only
+// linked members; tiered eyes 👀/⚠️👀/❗👀 are applied to unlinked members by
+// !interactions build). The "LVL<level>" suffix is appended only
 // when the member hasn't locked their nickname, level-suffixing is enabled, and a
 // level is known. When locked we preserve whatever the member kept (incl. any level
 // tag). Fitted to Discord's 32-char cap, reserving room so the LVL tag is never cut.
@@ -540,8 +541,8 @@ async function runRoleSyncTick(guild) {
         }
 
         // Path B: poll the persisted roster and sync every linked member, online or
-        // not. Offline character data comes from the server's save-file source (see
-        // get_player_all_slots.patch); the per-member signature cache below means an
+        // not. Offline character data comes from the server's save-file endpoint (all
+        // 20 character slots); the per-member signature cache below means an
         // unchanged member costs no Discord API calls, so this won't churn roles.
         for (const id of linkedRoster) {
             if (seen.has(id)) continue;
@@ -641,6 +642,7 @@ async function startRoleSync(guild) {
     // events keep it fresh thereafter.
     logInfo('ROLE-SYNC', `Active in "${guild.name}". Interval: ${intervalMs / 60000} min. Roster: ${linkedRoster.size} linked. Protected roles: ${PROTECTED_ROLES.size}.`);
     runRoleSyncTick(guild);
+    if (roleSyncTimer) clearInterval(roleSyncTimer);
     roleSyncTimer = setInterval(() => runRoleSyncTick(guild), intervalMs);
 
     // Fast online-presence loop (online role only). Clamped to >=10s to bound API load.
@@ -648,6 +650,7 @@ async function startRoleSync(guild) {
         const presenceSec = Math.max(10, Number(cfg.online_role_interval_seconds) || 30);
         logInfo('ROLE-SYNC', `Online-presence role loop active — every ${presenceSec}s (role id ${ONLINE_ROLE_ID}).`);
         runOnlinePresenceTick(guild);
+        if (onlinePresenceTimer) clearInterval(onlinePresenceTimer);
         onlinePresenceTimer = setInterval(() => runOnlinePresenceTick(guild), presenceSec * 1000);
     }
 }
@@ -661,8 +664,8 @@ async function handleSyncCommand(message) {
         }
         const info = await apiCall('get_player', { discord_id: message.author.id });
         // Diagnostic: record exactly what the server returned so offline-sync problems
-        // are visible via !log. If chars=0 while the player is offline, the server-side
-        // get_player_all_slots.patch is not returning save-file characters.
+        // are visible via !log. If chars=0 while the player is offline, the server's
+        // get_player endpoint is not returning save-file character slots.
         const charCount = ((info && (info.Characters || info.characters)) || []).filter((c) => c && c.exists !== false).length;
         logInfo('ROLE-SYNC', `!sync data for ${message.author.tag}: linked=${info && info.linked !== false && !info.error}, is_online=${!!(info && info.is_online)}, characters=${charCount}`);
         // The API layer turns any HTTP failure (e.g. a 500) into { error: ... }. Surface
@@ -718,12 +721,12 @@ async function handleSyncCommand(message) {
     }
 }
 
-// Admin command: "!sync all" — force a full re-sync of every LINKED website player the
+// Staff command: "!sync all" — force a full re-sync of every LINKED website player the
 // bot knows about (the persisted roster ∪ get_linked_players ∪ anyone online), online
 // or offline. This command is deliberately scoped to linked players ONLY (roles + 💠);
 // it does NOT scan history or touch the interaction log / lurker badges — that lives
-// entirely under `!interactions` (see runLurkerPass). The periodic tick only touches
-// online players; this is the manual "make every linked player correct right now" button.
+// entirely under `!interactions` (see runLurkerPass). Periodic ticks also refresh
+// linked roster members via Path B; this is the manual "sync everyone right now" tool.
 async function handleSyncAllCommand(message) {
     try {
         logInfo('COMMAND', `!sync all by ${message.author.tag} (${message.author.id})`);
@@ -1148,7 +1151,7 @@ async function dmAdminReport(message, fullText, commandName) {
     }
 }
 
-// Admin command: "!roles" — DM the full server role audit to the requesting admin.
+// Staff command: "!roles" — DM the full server role audit to the requesting staff member.
 async function handleRolesCommand(message) {
     try {
         logInfo('COMMAND', `!roles by ${message.author.tag} (${message.author.id})`);
@@ -1245,7 +1248,7 @@ function formatChannelAudit(audit) {
     return out;
 }
 
-// Admin command: "!channels" — DM the full channel permission audit to the admin.
+// Staff command: "!channels" — DM the full channel permission audit to the staff member.
 async function handleChannelsCommand(message) {
     try {
         logInfo('COMMAND', `!channels by ${message.author.tag} (${message.author.id})`);

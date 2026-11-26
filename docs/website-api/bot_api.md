@@ -5,7 +5,7 @@
 The bot's primary data endpoint. Bearer-authed (legacy `BOT_API_SECRET` **or** a bcrypt `bot_tokens` row). Dispatches on `?action=`.
 
 ## Consumed by (bot)
-[`api.js`](../modules/api.md) (`apiCall`), [`session.js`](../modules/session.md), [`roleSync.js`](../modules/roleSync.md), [`tools.js`](../modules/tools.md), [`tekkerChallenge.js`](../modules/tekkerChallenge.md) (future `claim_tekker_drop`).
+[`api.js`](../modules/api.md) (`apiCall`), [`session.js`](../modules/session.md), [`roleSync.js`](../modules/roleSync.md), [`tools.js`](../modules/tools.md). Token redemption (`claim_tekker_drop.php`) lives directly on the website rather than in [`tekkerChallenge.js`](../modules/tekkerChallenge.md).
 
 ## Actions used by the bot
 | Action | Method | Returns | Bot caller |

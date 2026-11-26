@@ -47,28 +47,31 @@ A comprehensive list of all player-facing and administrator commands available o
 
 ---
 
-## 🔐 Admin Commands
-*Require the **Administrator** permission. Audit reports are delivered via **DM** to the sender to prevent channel clutter.*
+## 🔐 Support & Admin Commands
+*Commands below are permission-gated: **Support** commands require `Community Support` (or `Administrator`), while **Admin** commands require `Administrator`. Audit/log reports are delivered via **DM** to the sender to prevent channel clutter.*
 
-*   **`!sync all`**
+*   **`!health`** _(Support / Admin)_
+    *   *Usage*: `!health`
+    *   *Purpose*: Re-runs startup dependency probes and reports backend status (`tekker_db`, `bot_api`, `vote_integration`, etc.) via DM or reply.
+*   **`!sync all`** _(Support / Admin)_
     *   *Usage*: `!sync all`
     *   *Purpose*: Forces a full re-sync of all linked players in the server (online and offline) to correct their roles/nicknames.
-*   **`!roles`**
+*   **`!roles`** _(Support / Admin)_
     *   *Usage*: `!roles`
     *   *Purpose*: Audits server roles to ensure they match expected names and lists permissions and position hierarchy relative to the bot.
-*   **`!channels`**
+*   **`!channels`** _(Support / Admin)_
     *   *Usage*: `!channels`
     *   *Purpose*: Audits server channel permission overwrites and DMs the report.
-*   **`!log`**
+*   **`!log`** _(Support / Admin)_
     *   *Usage*: `!log [lines]` (e.g. `!log 200`)
     *   *Purpose*: DMs the most recent bot action logs (sync triggers, errors, API counts).
-*   **`!restart`**
+*   **`!restart`** _(Admin)_
     *   *Usage*: `!restart`
     *   *Purpose*: Gracefully exits the process so systemd/supervisor manager relaunches it.
-*   **`!clear`** (alias **`!purge`**)
-    *   *Usage*: `!clear <count>` (e.g. `!clear 50`)
-    *   *Purpose*: Bulk deletes messages from the current channel (requires confirmation for counts over 100).
-*   **`!pull`** (aliases **`!gitpull`**, **`!update`**)
+*   **`!clear`** (alias **`!purge`**) _(Admin)_
+    *   *Usage*: `!clear <count>` or `!clear skip <n>`
+    *   *Purpose*: Bulk deletes messages from the current channel (or the next 100 after skipping `n` newest; requires confirmation for counts over 100).
+*   **`!pull`** (aliases **`!gitpull`**, **`!update`**) _(Admin)_
     *   *Usage*: `!pull`
     *   *Purpose*: Runs git pull and exits to automatically restart with the latest codebase updates.
 

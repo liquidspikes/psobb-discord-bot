@@ -8,11 +8,11 @@
 //   { name, aliases, prefixes, match, audience, passthrough, run }
 //   • name / aliases / prefixes — used to build the default matcher.
 //   • match(content)  — predicate. Defaults to a startsWith test built from
-//                       prefixes × (name + aliases), which preserves the exact
-//                       semantics (and shadowing!) of the original if-chain —
-//                       e.g. "!quests" is caught by the "!quest" entry. Custom
-//                       matchers handle the irregular cases: "!sync all" must
-//                       win over "!sync", and "!nickname" matches via regex.
+//                       prefixes × (name + aliases). Custom matchers handle
+//                       boundary and irregular cases: "!quest"/"$quest" uses
+//                       word-boundary matching so "!quests" passes through to
+//                       AI, "!sync all" wins over "!sync", and "!nickname"
+//                       matches via regex.
 //   • audience        — descriptive tier label ('admin'|'support'|'member')
 //                       for documentation. NOT enforced here: each handler
 //                       keeps its own permission check so its tailored refusal
@@ -121,7 +121,7 @@ register({
         const { giftReward } = require('./tekkerChallenge');
         const res = await giftReward(message.author.id, tokenId.trim().toUpperCase(), targetUser.id);
         if (res.success) {
-            return await message.reply(`🎁 **Gifted successfully!** Transferred token \`${tokenId.trim().toUpperCase()}\` (❓ SPECIAL WEAPON ${res.token.stat_native}/${res.token.stat_abeast}/${res.token.stat_machine}/${res.token.stat_dark}/${res.token.stat_hit}) to <@${targetUser.id}>.`);
+            return await message.reply(`🎁 **Gifted successfully!** Transferred token \`${tokenId.trim().toUpperCase()}\` (${TEKKER_MASKED_WEAPON} ${res.token.stat_native}/${res.token.stat_abeast}/${res.token.stat_machine}/${res.token.stat_dark}/${res.token.stat_hit}) to <@${targetUser.id}>.`);
         } else {
             return await message.reply(`❌ **Gift failed**: ${res.error}`);
         }
@@ -171,8 +171,8 @@ register({
         const offer = await message.channel.send({
             content:
                 `🤝 **Trade offer** — <@${target.id}>, <@${message.author.id}> wants to swap tokens:\n` +
-                `• You receive: \`${myToken}\` (❓ SPECIAL WEAPON ${fmt(mine)})\n` +
-                `• You give: \`${theirToken}\` (❓ SPECIAL WEAPON ${fmt(theirs)})\n\n` +
+                `• You receive: \`${myToken}\` (${TEKKER_MASKED_WEAPON} ${fmt(mine)})\n` +
+                `• You give: \`${theirToken}\` (${TEKKER_MASKED_WEAPON} ${fmt(theirs)})\n\n` +
                 `<@${target.id}> react ✅ to accept or ❌ to decline within 60s.`,
             allowedMentions: { users: [target.id, message.author.id] },
         });
@@ -229,7 +229,7 @@ register({
         if (tokens.length === 0) {
             return await message.reply("ℹ️ You have no unclaimed weapon tokens. Solve a `/guess` puzzle in the channel to earn one!");
         }
-        const lines = tokens.map(t => `• \`${t.token_id}\` — **❓ SPECIAL WEAPON** (${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit})`);
+        const lines = tokens.map(t => `• \`${t.token_id}\` — **${TEKKER_MASKED_WEAPON}** (${t.stat_native}/${t.stat_abeast}/${t.stat_machine}/${t.stat_dark}/${t.stat_hit})`);
         return await message.reply(`🎁 **Your Saved Weapon Tokens**:\n${lines.join('\n')}\n\n*Redeem these on https://psobb.io/ while logged in (Discord linked) and online in-game — you can combine up to 3 into one weapon. Or \`!gift <token_id> @player\` to give one away, or \`!trade @player <your_token> <their_token>\` to swap.*`);
     },
 });
@@ -392,8 +392,10 @@ register({
     },
 });
 
+// Keep exact word-boundary matching on !quest/$quest so !quests falls through to AI passthrough.
 register({
     name: 'quest', prefixes: ['!', '$'], audience: 'member',
+    match: (c) => /^[!$]quest(\s|$)/i.test(c),
     run: async (message) => {
         logInfo('COMMAND', `!quest (deprecated) by ${message.author.tag}`);
         return await message.reply("📡 **Notice:** The manual `!quest` command has been deprecated. Mission Command now monitors your progress automatically! You will receive random bounties directly to your Guild Card while playing on the server.");
@@ -444,12 +446,12 @@ register({
 });
 
 register({
-    name: 'lock', aliases: ['unlock'], audience: 'support',
+    name: 'lock', aliases: ['unlock'], audience: 'member',
     run: (message) => handleLockCommand(message),
 });
 
 register({
-    name: 'nickname', aliases: ['nick'], audience: 'support',
+    name: 'nickname', aliases: ['nick'], audience: 'member',
     match: (c) => /^!(nickname|nick)\b/i.test(c),
     run: (message) => handleNicknameCommand(message),
 });

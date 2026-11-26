@@ -332,6 +332,7 @@ async function startPartyRooms(guild) {
     await reconcile();
     logInfo('PARTY', `Party rooms active in "${category.name}". Support role: ${supportRole ? supportRole.name : '(none)'}. Interval ${INTERVAL_MS / 1000}s, grace ${GRACE_MS / 1000}s, min linked ${MIN_LINKED}. Auto-move: ${AUTO_MOVE ? `on (lobby ${LOBBY_ID})` : 'off'}. Tracking ${Object.keys(rooms).length} existing room(s).`);
     await pollParties(guild);
+    if (timer) clearInterval(timer);
     timer = setInterval(() => pollParties(guild), INTERVAL_MS);
 }
 

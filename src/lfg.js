@@ -162,6 +162,7 @@ async function startLfgWatcher() {
 
     logInfo('LFG', `Watcher active in #${channel.name || LFG_CHANNEL_ID}. Interval: ${LFG_INTERVAL_MS / 1000}s. Cursor: ${lastId === null ? 'unseeded' : lastId}.`);
     await pollLfg(channel);
+    if (lfgTimer) clearInterval(lfgTimer);
     lfgTimer = setInterval(() => pollLfg(channel), LFG_INTERVAL_MS);
 }
 

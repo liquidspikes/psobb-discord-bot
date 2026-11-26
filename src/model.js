@@ -49,7 +49,5 @@ function getModel(modelName = candidateModelNames[0]) {
     return modelCache.get(modelName);
 }
 
-const model = getModel(candidateModelNames[0]);
-
-module.exports = { model, getModel, buildGenerationConfig, candidateModelNames, genAI };
+module.exports = { getModel, buildGenerationConfig, candidateModelNames };
 

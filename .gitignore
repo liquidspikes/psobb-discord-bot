@@ -2,4 +2,6 @@ discord_config.json
 node_modules/
 *.log
 test_memory/
+.vscode/
+
 

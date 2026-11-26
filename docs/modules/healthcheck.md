@@ -16,7 +16,7 @@
 | `featureForTool(toolName)` | Maps an AI tool name → its feature key (or `null`). |
 | `toolDownResult(toolName)` | `{ error }` for the model to relay when a tool's feature is down. |
 | `gateCommand(message)` | If the message is a command for a disabled feature, reply with a notice and return `true` (blocked). |
-| `handleHealthCommand(message)` | `!health` — admin-only; re-probes and reports. |
+| `handleHealthCommand(message)` | `!health` — staff (`canSupport`); re-probes and reports. |
 | `summaryText()` / `detailedReport()` | Short DM summary / full `!health` report. |
 
 ## Dependency → feature map
@@ -25,18 +25,19 @@
 | `bot_api` (`get_online_players`) | `role_sync` | `!sync`/`!nickname` reply "unavailable"; tick not started |
 | `lfg_api` (`get_lfg`) | `lfg` | LFG watcher not started |
 | `parties_api` (`get_parties`) | `party_rooms` | Party rooms not started |
-| `tekker_db` (`ping`) | `tekker` | `/guess`/`!tekker`/`!tokens`/`!claim`/`!gift` reply "unavailable"; voice trigger not started |
+| `tekker_db` (`pingDetailed`) | `tekker` | `/guess`/`!tekker`/`!tokens`/`!claim`/`!gift`/`!trade` reply "unavailable"; voice trigger not started (marks LOCAL when `LOCAL_MODE` is active) |
 | `drops_api` (`get_drops.php`) | `drops` | `search_drops` tool returns an error the model relays |
 | `summary_api` (`/api/summary`) | `server_stats` | `get_server_stats` tool returns an error |
 | `agent_state` (`agent_state.json`) | `decryption` | `get_decryption_status` tool returns an error |
 | `vote_integration` (`VOTE_SCRIPTS_DIR` readable) | `vote` | `get_active_vote_status` / `get_recent_votes` return an error the model relays → see [votes](../website-api/votes.md) |
 
 ## Depends on
-[`api`](api.md) (`apiCall`, `getDropsData`), [`tekkerDb`](tekkerDb.md) (`ping`), [`actionLog`](actionLog.md), `axios`.
+[`api`](api.md) (`apiCall`, `getDropsData`), [`tekkerDb`](tekkerDb.md) (`pingDetailed`, `LOCAL_MODE`), [`tools`](tools.md) (`VOTE_SCRIPTS_DIR`), [`actionLog`](actionLog.md), [`permissions`](permissions.md) (lazy), `axios`.
 
 ## Depended on by
 - [`bot.js`](bot.md) — `runStartupChecks` + `isFeatureUp` to skip background feature starts.
-- [`messageHandler`](messageHandler.md) — `gateCommand`, `isFeatureUp`/`featureForTool`/`toolDownResult` (tool loop), `handleHealthCommand` (`!health`).
+- [`commands`](commands.md) — `gateCommand`, `handleHealthCommand` (`!health`).
+- [`messageHandler`](messageHandler.md) — `isFeatureUp` / `featureForTool` / `toolDownResult` (tool loop + `/guess` + activity hooks).
 - [`system`](system.md) — the summary is folded into the startup admin DM.
 
 ## Key behaviors / gotchas

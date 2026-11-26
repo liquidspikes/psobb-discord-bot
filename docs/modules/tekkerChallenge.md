@@ -13,32 +13,30 @@
 | Symbol | Description |
 | --- | --- |
 | `generateDrop()` | Roll + persist a new drop (backend-authoritative); returns `null` if backend is down. |
-| `endActiveDrop(endedByName)` | **Admin end-early** — deactivate the active drop, clear trackers + phase messages, post a stats reveal. Returns the ended drop or `null` if none active. |
-| `announceDrop(drop)` | Post the drop embed to the tekker channel, pinging the online role. |
+| `endActiveDrop(endedByName)` | **Admin end-early** (`!tekker end`) — deactivate the active drop, clear trackers + phase messages, post a stats reveal. Returns the ended drop or `null` if none active. |
+| `announceDrop(drop)` | Post the drop embed to the tekker channel, pinging `ONLINE_ROLE_ID`. |
 | `processSlashGuess(interaction)` | **Live path** — validate + score `/guess`; mint token on win. |
-| `processGuess(message, args)` | **Legacy** prefix-`!guess` scorer; no longer routed (the `!guess` command now just redirects to `/guess`). |
-| `trackActivity(userId, guild, type)` | Cooldown-gated chance to spawn a drop (linked users only). |
-| `startDespawnWatcher()` | Start the 30s expiry/despawn interval (called once by `bot.js`). |
+| `trackActivity(userId, guild, type)` | Cooldown-gated chance to spawn a drop (linked users only, via `roleSync.isUserLinked`). |
+| `startDespawnWatcher()` | Start the 30s expiry/despawn interval (called once by `bot.js`, guarded against null `drop_id` / duplicate despawns via `lastDespawnedKey`). |
 | `giftReward(ownerId, tokenId, targetId)` | Transfer a token. |
-| `claimReward(userId, tokenId)` | **Legacy/unused** claim seam, still gated behind `config.tekker.claim_enabled`. No command calls it — `!claim` now points players to the website. |
 | `adminGrantToken(ownerId, stats[5])` | Mint a token with set stats. |
-| `isUserLinked(userId)` | Reads `linked_roster.json`. |
-| `MASKED_WEAPON` | The `❓ SPECIAL WEAPON` label. |
+| `isUserLinked(userId)` | Re-exported from [`roleSync`](roleSync.md). |
+| `MASKED_WEAPON` | Re-export of [`pso`](pso.md) `TEKKER_MASKED_WEAPON` (`❓ SPECIAL WEAPON`). |
 
 ## Depends on
-[`config`](config.md), [`tekkerDb`](tekkerDb.md) (all persistence), [`actionLog`](actionLog.md), [`discordClient`](discordClient.md), `axios`. Reads `MEMORY_DIR/linked_roster.json` directly for the linked check.
+[`config`](config.md), [`tekkerDb`](tekkerDb.md) (all persistence), [`actionLog`](actionLog.md), [`discordClient`](discordClient.md), [`roleSync`](roleSync.md) (`isUserLinked`), [`pso`](pso.md) (`WEAPON_ATTR_CATEGORIES`, `WEAPON_ATTR_EMOJIS`, `TEKKER_MASKED_WEAPON`).
 
 ## Depended on by
-[`commands`](commands.md) (`!gift`/`!tekker grant`/`!tekker roll`), [`messageHandler`](messageHandler.md) (`/guess` slash + activity hooks), [`bot.js`](bot.md) (voice `trackActivity` + `startDespawnWatcher`).
+[`commands`](commands.md) (`!gift`/`!tekker*`), [`messageHandler`](messageHandler.md) (`/guess` slash + activity hooks), [`bot.js`](bot.md) (voice `trackActivity` + `startDespawnWatcher`).
 
 ## Config keys
-`tekker.channel_id` (or `tekker_channel_id`), `role_sync.online_role_id` (the drop ping), `tekker.claim_enabled` (legacy claim seam — off).
+`tekker.channel_id` (or `tekker_channel_id`), `ONLINE_ROLE_ID` (`role_sync.online_role_id`, the drop ping), `tekker.keep_message_id`.
 
 ## Key behaviors / gotchas
 - **Channel-confined:** drops announce in, and guesses are only accepted in, the tekker channel (`tekker.channel_id`, fallback id hard-coded).
 - **Channel wiped at game start:** `announceDrop` calls `clearChannelExcept(channel, KEEP_MESSAGE_ID)` before posting, deleting every message in the tekker channel except `tekker.keep_message_id` (the pinned info post). Uses `bulkDelete` (<14-day messages) + individual deletes for older ones; needs **Manage Messages**. `phaseMessageIds` is reset afterward.
 - **Attempts:** 5 base / **8 boosters** (`BOOSTER_ROLE_ID` is hard-coded, no config override — see `CODE_REVIEW_REPORT.md` risk #4). The slash path also **lazily regenerates 1 attempt/hour** since the last guess.
-- **Stat legality** — every attribute, **Hit included**, is *divisible by 5 and 0–90%*. This mirrors the backend roll (`base` 15–80 + `±10` variance ⇒ hard ceiling 90; the PHP `min(100,…)` is a harmless over-clamp). The slash `/guess` options also set `min_value:0`/`max_value:90` so Discord rejects out-of-range input client-side. Enforced consistently in `processSlashGuess`, the legacy `processGuess`, and `adminGrantToken`.
+- **Stat legality** — every attribute, **Hit included**, is *divisible by 5 and 0–90%*. This mirrors the backend roll (`base` 15–80 + `±10` variance ⇒ hard ceiling 90; the PHP `min(100,…)` is a harmless over-clamp). The slash `/guess` options also set `min_value:0`/`max_value:90` so Discord rejects out-of-range input client-side. Enforced consistently in `processSlashGuess` and `adminGrantToken`.
 - **Drop mechanics (slash path):**
   - **Appraisal lock** — a guesser holds a 10s lock (+5s fumble) so others can't snipe mid-inspection.
   - **Second-zero discovery** — one zero is the public hint; a hidden second zero is revealed publicly (`discoverSecondZero`) when a player guesses it 0 with ≤2 zeros total.

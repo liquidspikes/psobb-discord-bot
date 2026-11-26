@@ -28,8 +28,11 @@
 ## Constants
 - `TWO_WEEKS_MS` (active window / 👀 lower bound), `FORTY_FIVE_DAYS_MS` (⚠️ threshold), `ONE_HOUR_MS` (write throttle).
 
+## Depends on
+[`config`](config.md), [`actionLog`](actionLog.md), [`jsonStore`](jsonStore.md), [`permissions`](permissions.md) (`canSupport`), and lazily [`roleSync`](roleSync.md) (`runLurkerPass`).
+
 ## Depended on by
-[`roleSync`](roleSync.md) (`lurkerTier` → badge tier; and `!interactions build` lazy-requires `roleSync.runLurkerPass` to apply the badges), [`messageHandler`](messageHandler.md) (`markInteracted`).
+[`roleSync`](roleSync.md) (`lurkerTier` → badge tier; and `!interactions build` lazy-requires `roleSync.runLurkerPass` to apply the badges), [`messageHandler`](messageHandler.md) (`markInteracted`), [`commands`](commands.md) (`handleInteractionsCommand`).
 
 ## Key behaviors / gotchas
 - **Separation:** `!sync all` no longer scans history or applies eyes — that is entirely `!interactions build`. Linked players (💠) are `!sync`'s job.

@@ -1,5 +1,4 @@
 // Core Game Logic Layer for Discord Tekker Challenge
-const axios = require('axios');
 const { config, ONLINE_ROLE_ID } = require('./config');
 const db = require('./tekkerDb');
 const { logInfo, logWarn, logError } = require('./actionLog');
@@ -165,193 +164,6 @@ async function announceDrop(drop) {
     }
 }
 
-// Process user guess and return feedback embed
-async function processGuess(message, guessArgs) {
-    // Confine the game to its channel: a guess made elsewhere (in a guild) is
-    // pointed back to the Tekker channel and does NOT consume an attempt.
-    if (message.guild && message.channel.id !== TEKKER_CHANNEL_ID) {
-        return await message.reply(`🎮 The Tekker Challenge runs in <#${TEKKER_CHANNEL_ID}> — post your \`/guess\` there!`);
-    }
-
-    // Auto-clear the player's guess message after 5s to keep the channel tidy.
-    // Requires the bot to have Manage Messages in this channel; only in a guild
-    // (can't delete others' DMs). Surface a failure so a missing perm is visible.
-    const GUESS_TIDY_MS = 5000;
-    if (message.guild) {
-        setTimeout(() => {
-            message.delete().catch((e) =>
-                logWarn('TEKKER', `Could not auto-delete guess from ${message.author.tag} — do I have Manage Messages in #${message.channel && message.channel.name}? (${e.message})`));
-        }, GUESS_TIDY_MS);
-    }
-
-    // Bot feedback to a guess is transient too: auto-delete each reply after the same
-    // 5s window (in a guild) so the channel doesn't fill with per-attempt responses.
-    // The public win announcement below is intentionally NOT cleaned.
-    const replyTidy = async (payload) => {
-        const sent = await message.reply(payload);
-        if (message.guild) setTimeout(() => sent.delete().catch(() => {}), GUESS_TIDY_MS);
-        return sent;
-    };
-
-    // 1. Resolve active drop
-    const drop = await db.getActiveDrop();
-    if (!drop) {
-        return await replyTidy("⚠️ There is no active weapon drop puzzle right now. Activity in the server will trigger the scanner to detect a new drop!");
-    }
-
-    // 2. Validate guess arguments
-    if (!Array.isArray(guessArgs) || guessArgs.length !== 5) {
-        return await replyTidy(`🗡️ **Usage**: \`/guess [Native] [A.Beast] [Machine] [Dark] [Hit]\` (e.g. \`/guess 0 10 35 0 5\`)`);
-    }
-
-    const guesses = guessArgs.map(x => parseInt(x));
-    if (guesses.some(isNaN)) {
-        return await replyTidy("⚠️ Please enter valid integers for all 5 weapon stats.");
-    }
-
-    const categories = CATEGORIES;
-    const validationErrors = [];
-    for (let i = 0; i < 5; i++) {
-        const val = guesses[i];
-        if (val < 0) {
-            validationErrors.push(`${categories[i]} cannot be negative.`);
-        }
-        if (val % 5 !== 0) {
-            validationErrors.push(`${categories[i]} must be divisible by 5.`);
-        }
-        // Every attribute (Hit included) tops out at 90%: the backend rolls a
-        // base of 15–80 and applies ±10 variance, so 90 is the hard ceiling.
-        if (val > 90) validationErrors.push(`${categories[i]} cannot exceed 90%.`);
-    }
-
-    if (validationErrors.length > 0) {
-        return await replyTidy(`⚠️ **Validation failed**:\n${validationErrors.map(e => `• ${e}`).join('\n')}`);
-    }
-
-    // 3. Resolve booster status and attempts limits
-    const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
-    let isBooster = false;
-    if (member) {
-        const hasRole = member.roles.cache.has(BOOSTER_ROLE_ID);
-        const isPremium = member.premiumSince !== null || member.roles.cache.some(r => r.tags && r.tags.premiumSubscriberRole);
-        isBooster = hasRole || isPremium;
-    }
-    const maxAttempts = isBooster ? 8 : 5;
-
-    let playerState = await db.getPlayerState(message.author.id, drop.drop_id);
-    let attemptsUsed = playerState ? playerState.attempts_used : 0;
-
-    if (attemptsUsed >= maxAttempts) {
-        return await replyTidy(`⚠️ You have exhausted your attempts (**${attemptsUsed}/${maxAttempts}**) for this drop. Let other players solve it!`);
-    }
-
-    attemptsUsed++;
-    await db.upsertPlayerState(message.author.id, drop.drop_id, attemptsUsed, maxAttempts);
-
-    // 4. Compare stats and compile Higher/Lower/Correct feedback
-    const trueStats = [drop.stat_native, drop.stat_abeast, drop.stat_machine, drop.stat_dark, drop.stat_hit];
-    let correctCount = 0;
-    const lines = [];
-
-    for (let i = 0; i < 5; i++) {
-        const cat = categories[i];
-        const emoji = EMOJIS[cat];
-        const gVal = guesses[i];
-        const tVal = trueStats[i];
-        
-        if (cat === drop.hint_attribute) {
-            // Hint is locked and always correct
-            correctCount++;
-            lines.push(`${emoji} **${cat}**: ${gVal}% 🔒 *(Hint)*`);
-        } else if (gVal === tVal) {
-            correctCount++;
-            lines.push(`${emoji} **${cat}**: ${gVal}% ✅ *(Correct)*`);
-        } else if (gVal < tVal) {
-            lines.push(`${emoji} **${cat}**: ${gVal}% 🔼 *(Higher)*`);
-        } else {
-            lines.push(`${emoji} **${cat}**: ${gVal}% 🔽 *(Lower)*`);
-        }
-    }
-
-    // 5. Evaluate win condition
-    const isWin = correctCount === 5;
-    const resultState = isWin ? 'Win' : (attemptsUsed >= maxAttempts ? 'Loss' : 'In_Progress');
-    
-    // Log telemetry
-    await db.addTelemetryLog(message.author.id, drop.drop_id, guesses, resultState);
-
-    if (isWin) {
-        // Deactivate drop
-        await db.deactivateDrop(drop.drop_id);
-        await db.clearActiveUsers(); // Reset activity points
-
-        // Mint the reward token: owner + the guaranteed stats. No weapon — that's
-        // resolved later by the website claim page.
-        const tokenId = generateTokenId();
-        await db.createToken({
-            token_id: tokenId,
-            owner_id: message.author.id,
-            stat_native: trueStats[0],
-            stat_abeast: trueStats[1],
-            stat_machine: trueStats[2],
-            stat_dark: trueStats[3],
-            stat_hit: trueStats[4]
-        });
-
-        // Announce win publicly
-        const embed = {
-            title: `🏆 SPECIAL WEAPON CLAIMED 🏆`,
-            description: `🎉 Congratulations **${message.author.username}**! You solved all stats on attempt **${attemptsUsed}/${maxAttempts}**!\n\n` +
-                         `*Your token locks in these guaranteed attributes for a **${MASKED_WEAPON}** — redeem it later on the website.*\n\n` +
-                         `**Final Stats Resolved**:\n` +
-                         `🗡️ Native: **${trueStats[0]}%**\n` +
-                         `🐾 A.Beast: **${trueStats[1]}%**\n` +
-                         `🤖 Machine: **${trueStats[2]}%**\n` +
-                         `👻 Dark: **${trueStats[3]}%**\n` +
-                         `🎯 Hit: **${trueStats[4]}%**\n\n` +
-                         `🎁 **Reward Token Generated**: \`${tokenId}\`\n\n` +
-                         `*Your token is **saved to your account**. In-game claiming is coming soon — use **\`!tokens\`** to view it, or **\`!gift ${tokenId} @PlayerName\`** to gift it!*`,
-            color: 0x00c8ff // Vibrant sky blue
-        };
-        if (db.LOCAL_MODE) embed.description += `\n\n${TEST_MODE_WIN_NOTICE}`;
-
-        logInfo('TEKKER', `Win: ${message.author.tag} solved stats ${trueStats.join('/')} on attempt ${attemptsUsed}/${maxAttempts} → token ${tokenId}`);
-
-        // Public report (👀 + ping) + the win embed. Sent to the channel (not as a
-        // reply) since the player's guess message is auto-deleted.
-        await message.channel.send({
-            content: `👀 <@${message.author.id}> guessed **right**! 🎉 Solved in ${attemptsUsed}/${maxAttempts} attempts.`,
-            embeds: [embed],
-            allowedMentions: { parse: [], users: [message.author.id] },
-            flags: [MessageFlags.SuppressNotifications],
-        });
-    } else {
-        // Send feedback embed
-        const embed = {
-            author: {
-                name: `${message.author.username}'s Attempt (${attemptsUsed}/${maxAttempts})`,
-                icon_url: message.author.displayAvatarURL({ dynamic: true })
-            },
-            description: lines.join('\n') + (attemptsUsed >= maxAttempts ? `\n\n❌ **Attempt Limit Reached.** You cannot guess again for this drop.` : ''),
-            color: attemptsUsed >= maxAttempts ? 0xff4444 : 0xffcc00 // Red on exhaust, Yellow otherwise
-        };
-        // 👀 report line + feedback embed. Sent to the channel (not a reply) since the
-        // guess message is auto-deleted; the @mention renders but doesn't ping on
-        // every wrong guess.
-        const status = attemptsUsed >= maxAttempts
-            ? `out of attempts (${attemptsUsed}/${maxAttempts})`
-            : `${attemptsUsed}/${maxAttempts} attempts`;
-        const sent = await message.channel.send({
-            content: `👀 <@${message.author.id}> guessed **wrong** — ${status}.`,
-            embeds: [embed],
-            allowedMentions: { parse: [], users: [] },
-            flags: [MessageFlags.SuppressNotifications],
-        });
-        // Tidy the per-guess feedback after the same 5s window as the guess message.
-        if (message.guild) setTimeout(() => sent.delete().catch(() => {}), GUESS_TIDY_MS);
-    }
-}
-
 // Track Discord user activity (Messages, Reactions, Voice) and roll chance-based drop trigger
 async function trackActivity(userId, guild, type) {
     // 1. Verify user is linked on website
@@ -373,7 +185,7 @@ async function trackActivity(userId, guild, type) {
     const activeDrop = await db.getActiveDrop();
     if (activeDrop) return;
 
-    // 4. Log active user interaction in SQLite
+    // 4. Record active user contributor in the Tekker store
     await db.addActiveUser(userId);
 
     // 5. Evaluate trigger chance
@@ -428,81 +240,6 @@ async function giftReward(ownerId, tokenId, targetUserId) {
     await db.transferToken(tokenId, targetUserId);
     logInfo('TEKKER', `Token ${tokenId} gifted from ${ownerId} to ${targetUserId}`);
     return { success: true, token };
-}
-
-// Claim a weapon token and drop it at player's feet
-async function claimReward(userId, tokenId) {
-    const token = await db.getToken(tokenId);
-    if (!token) {
-        return { success: false, error: `Token \`${tokenId}\` not found.` };
-    }
-    if (token.owner_id !== userId) {
-        return { success: false, error: "You do not own this token." };
-    }
-    if (token.is_claimed) {
-        return { success: false, error: "This token has already been claimed." };
-    }
-
-    // Claiming is NOT built yet. The token (owner + guaranteed stats) stays saved
-    // and giftable; redemption — and which weapon the stats apply to — will be
-    // decided by the future website claim page. Until config.tekker.claim_enabled
-    // is turned on (and that page exists, see TEKKER_CLAIM_INTEGRATION.md), report
-    // the token as safely saved. The block below is the ready-to-go seam.
-    const statString = `${token.stat_native}/${token.stat_abeast}/${token.stat_machine}/${token.stat_dark}/${token.stat_hit}`;
-    if (!(config.tekker && config.tekker.claim_enabled)) {
-        return {
-            success: false,
-            pending: true,
-            message: `Your **${MASKED_WEAPON}** token \`${tokenId}\` (guaranteed stats **${statString}**) is **saved to your account**. Redemption isn't live yet — you'll be able to claim it once the website claim page ships. Use \`!gift ${tokenId} @player\` to transfer it in the meantime.`,
-        };
-    }
-
-    if (!isUserLinked(userId)) {
-        return { success: false, error: "Your Discord account is not linked. Please sign into https://psobb.io/login and link Discord in your player dashboard first." };
-    }
-
-    try {
-        // Hand the token (owner + guaranteed stats) to the future claim endpoint;
-        // the website decides which weapon the stats apply to.
-        const url = config.psobb_api_url + "&action=claim_tekker_drop";
-        const resp = await axios.post(url, {
-            discord_id: userId,
-            token_id: tokenId,
-            stats: {
-                native: token.stat_native, abeast: token.stat_abeast, machine: token.stat_machine,
-                dark: token.stat_dark, hit: token.stat_hit
-            }
-        }, {
-            headers: {
-                'Authorization': "Bearer " + config.psobb_api_secret,
-                'Content-Type': 'application/json'
-            },
-            timeout: 15000
-        });
-
-        if (resp.data && resp.data.success) {
-            await db.markTokenClaimed(tokenId, userId);
-            logInfo('TEKKER', `Token ${tokenId} claimed successfully by ${userId}`);
-            return { success: true, message: resp.data.message };
-        } else {
-            const errMsg = resp.data && resp.data.error ? resp.data.error : "Unknown backend error.";
-            return { success: false, error: errMsg };
-        }
-    } catch (e) {
-        const status = e.response ? e.response.status : null;
-        let detail = e.message;
-        if (e.response && e.response.data) {
-            const body = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
-            detail = body;
-            // Extract error message from JSON response if present
-            try {
-                const parsed = JSON.parse(body);
-                if (parsed.error) detail = parsed.error;
-            } catch (jsonErr) {}
-        }
-        logError('API', `claim_tekker_drop${status ? ` [${status}]` : ''} → ${detail}`);
-        return { success: false, error: `Pioneer 2 link failed: ${detail}` };
-    }
 }
 
 async function clearPhaseMessages() {
@@ -946,10 +683,8 @@ function startDespawnWatcher() {
 module.exports = {
     generateDrop,
     announceDrop,
-    processGuess,
     trackActivity,
     giftReward,
-    claimReward,
     adminGrantToken,
     isUserLinked,
     MASKED_WEAPON,

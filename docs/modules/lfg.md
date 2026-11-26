@@ -19,7 +19,7 @@
 `lfg_sync.{enabled,channel_id,interval_seconds}` (or top-level `lfg_channel_id`). Floors: interval ≥ 15s. **Hard-coded channel-id fallback** `1502345296737337474`.
 
 ## Depends on
-[`config`](config.md), [`discordClient`](discordClient.md), [`api`](api.md), [`actionLog`](actionLog.md), [`notificationPrefs`](notificationPrefs.md) (opt-in DMs).
+[`config`](config.md), [`discordClient`](discordClient.md), [`api`](api.md), [`actionLog`](actionLog.md), [`jsonStore`](jsonStore.md), [`pso`](pso.md) (`resolveGuildRole`), [`notificationPrefs`](notificationPrefs.md) (opt-in DMs).
 
 ## Depended on by
 [`bot.js`](bot.md).

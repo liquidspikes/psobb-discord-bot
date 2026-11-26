@@ -1,5 +1,5 @@
-// PSOBB game-data constants and value normalizers shared across modules
-// (session detection + role sync). Pure functions/data, no side effects.
+// PSOBB game-data constants, guild role helper, and value normalizers shared
+// across bot modules. Pure functions/data, no side effects.
 
 // Canonical role names. The 12 subclasses map to their 3 main classes.
 const SUBCLASS_TO_MAIN = {

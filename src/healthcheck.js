@@ -6,12 +6,14 @@
 //   - background features (role-sync tick, LFG watcher, party rooms, the
 //     voice-activity tekker trigger) are simply not started (see bot.js),
 //   - command features (!sync, !nickname, /guess, !tekker, !tokens, !claim,
-//     !gift) reply to the invoker with a "temporarily unavailable" notice,
-//   - AI tools (search_drops, get_server_stats, get_decryption_status) return
-//     an error the model relays to the user.
+//     !gift, !trade) reply to the invoker with a "temporarily unavailable" notice,
+//   - AI tools (search_drops, get_server_stats, get_decryption_status,
+//     get_active_vote_status, get_recent_votes) return an error the model relays
+//     to the user.
 // Results are logged under the HEALTH category and surfaced in the admin
-// startup DM. Admins can re-run the probes at any time with "!health" (so a
-// feature can be re-enabled after the website is fixed, without a restart).
+// startup DM. Admins and Community Support can re-run the probes at any time
+// with "!health" (so a feature can be re-enabled after the website is fixed,
+// without a restart).
 // =====================================================================
 const fs = require('fs');
 const axios = require('axios');
@@ -99,7 +101,7 @@ const FEATURES = {
     role_sync:    { label: 'Role & nickname sync',  deps: ['bot_api'],     commands: ['!sync', '!nickname'] },
     lfg:          { label: 'LFG announcer',          deps: ['lfg_api'],     background: true },
     party_rooms:  { label: 'Party voice rooms',      deps: ['parties_api'], background: true },
-    tekker:       { label: 'Tekker Challenge',       deps: ['tekker_db'],   commands: ['/guess', '!tekker', '!tokens', '!claim', '!gift'] },
+    tekker:       { label: 'Tekker Challenge',       deps: ['tekker_db'],   commands: ['/guess', '!tekker', '!tokens', '!claim', '!gift', '!trade'] },
     drops:        { label: 'Drop search',            deps: ['drops_api'],   tool: 'search_drops' },
     server_stats: { label: 'Live server stats',      deps: ['summary_api'], tool: 'get_server_stats' },
     decryption:   { label: 'Decryption status',      deps: ['agent_state'], tool: 'get_decryption_status' },
@@ -205,6 +207,7 @@ const COMMAND_FEATURE = [
     { test: (c) => /^!tokens\b/i.test(c), feature: 'tekker' },
     { test: (c) => /^!claim\b/i.test(c), feature: 'tekker' },
     { test: (c) => /^!gift\b/i.test(c), feature: 'tekker' },
+    { test: (c) => /^!trade\b/i.test(c), feature: 'tekker' },
     { test: (c) => /^!sync\b/i.test(c), feature: 'role_sync' },          // !sync and !sync all
     { test: (c) => /^!(nickname|nick)\b/i.test(c), feature: 'role_sync' },
 ];
@@ -231,7 +234,7 @@ function toolDownResult(toolName) {
     };
 }
 
-// Admin command: "!health" — re-probe all dependencies and report status.
+// Staff command: "!health" — re-probe all dependencies and report status.
 async function handleHealthCommand(message) {
     try {
         if (!message.guild) return await message.reply('⚠️ Run `!health` in the server (not DMs).');
